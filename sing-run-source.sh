@@ -325,16 +325,18 @@ _sing_source_update() {
     if [[ -n "$configured_url" ]]; then
       input_type="url"
       input_value="$configured_url"
+    elif [[ -f "$SING_RUN_SCRIPT_DIR/data/$source" ]]; then
+      input_type="file"
+      input_value="$SING_RUN_SCRIPT_DIR/data/$source"
     else
       echo "错误: 未指定更新方式，且源 '$source' 未配置订阅 URL" >&2
+      echo "也未找到本地数据文件: $SING_RUN_SCRIPT_DIR/data/$source" >&2
       echo "" >&2
       echo "用法:" >&2
       echo "  sing-run update-nodes $source --url <订阅URL>" >&2
       echo "  sing-run update-nodes $source --file <文件路径>" >&2
       echo "  sing-run update-nodes $source --string <base64内容>" >&2
-      echo "" >&2
-      echo "或在 sources.sh 中配置订阅 URL (第三个字段):" >&2
-      echo "  SING_RUN_SOURCE_DEFS=(\"$(_sing_source_get_name "$source") | $source | https://...\")" >&2
+      echo "  或将数据文件放入 data/$source" >&2
       return 1
     fi
   fi
