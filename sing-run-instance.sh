@@ -73,7 +73,7 @@ _sing_instance_find_utun() {
 }
 
 # Get saved interface for an instance, or allocate a new one
-# Always validates the saved interface isn't conflicting with other running instances
+# Pure function: returns interface name without persisting to disk
 _sing_instance_alloc_interface() {
   local region="$1"
   local interface_file="$SING_RUN_INSTANCES_DIR/$region/state/interface.txt"
@@ -104,21 +104,30 @@ _sing_instance_alloc_interface() {
   
   # Allocate new interface (exclude this region from conflict check)
   local interface=$(_sing_instance_find_utun "$region")
-  
-  # Save for future use
+  echo "$interface"
+}
+
+# Persist interface allocation to disk (call after successful TUN start)
+_sing_instance_save_interface() {
+  local region="$1"
+  local interface="$2"
+  local interface_file="$SING_RUN_INSTANCES_DIR/$region/state/interface.txt"
   mkdir -p "$(dirname "$interface_file")"
   echo "$interface" > "$interface_file"
-  
-  echo "$interface"
 }
 
 # Get instance configuration for a region
 # Returns: interface ip_cidr socks_port http_port config_dir
+# interface is only allocated for TUN mode (auto_route=true)
 _sing_instance_get_config() {
   local region="$1"
+  local auto_route="${2:-false}"
   local instance_num=$(_sing_instance_region_to_num "$region")
   
-  local interface=$(_sing_instance_alloc_interface "$region")
+  local interface=""
+  if [[ "$auto_route" == "true" ]]; then
+    interface=$(_sing_instance_alloc_interface "$region")
+  fi
   local ip_cidr="172.19.$((instance_num * 4)).1/30"
   local socks_port=$((7800 + instance_num * 10))
   local http_port=$((7801 + instance_num * 10))
@@ -240,15 +249,17 @@ _sing_instance_gen_config() {
   local auto_route="${3:-false}"
   
   # Get instance configuration
-  read interface ip_cidr socks_port http_port config_dir <<< "$(_sing_instance_get_config "$region")"
+  read interface ip_cidr socks_port http_port config_dir <<< "$(_sing_instance_get_config "$region" "$auto_route")"
   
   # Get source for this instance
   local source=$(_sing_source_get_instance "$region")
   
   # Get node information (with source)
-  local nodes_output=$(_sing_region_get_nodes "$region" "$source")
+  local nodes_output
+  nodes_output=$(_sing_region_get_nodes "$region" "$source")
   if [[ $? -ne 0 ]] || [[ -z "$nodes_output" ]]; then
     echo "错误: 无法获取 $region 区域的节点信息" >&2
+    echo "请先更新节点: sing-run update-nodes" >&2
     return 1
   fi
   
@@ -353,8 +364,11 @@ _sing_instance_start() {
   fi
   
   # Get instance configuration first (needed for config_dir)
-  read interface ip_cidr socks_port http_port config_dir <<< "$(_sing_instance_get_config "$region")"
+  read interface ip_cidr socks_port http_port config_dir <<< "$(_sing_instance_get_config "$region" "$auto_route")"
   
+  # Ensure instance directories exist before any file operations
+  _sing_instance_ensure_dirs "$region"
+
   # Generate configuration
   if [[ "$auto_route" == "true" ]]; then
     echo "正在为 $region 生成配置 (节点索引: $node_index, TUN: ✓)..."
@@ -362,7 +376,8 @@ _sing_instance_start() {
     echo "正在为 $region 生成配置 (节点索引: $node_index)..."
   fi
   
-  local config_file=$(_sing_instance_gen_config "$region" "$node_index" "$auto_route")
+  local config_file
+  config_file=$(_sing_instance_gen_config "$region" "$node_index" "$auto_route")
   if [[ $? -ne 0 ]]; then
     return 1
   fi
@@ -499,6 +514,11 @@ _sing_instance_start() {
     
     # Save node index
     _sing_instance_set_node "$region" "$node_index"
+    
+    # Persist interface allocation for TUN mode
+    if [[ "$auto_route" == "true" && -n "$interface" ]]; then
+      _sing_instance_save_interface "$region" "$interface"
+    fi
     
     return 0
   else
@@ -666,14 +686,16 @@ _sing_instance_status() {
       ((running_count++))
       
       local pid=$(_sing_instance_get_pid "$region")
-      read interface ip_cidr socks_port http_port config_dir <<< "$(_sing_instance_get_config "$region")"
       
-      # Check auto_route status
+      # Check auto_route status first (needed for get_config)
       local auto_route_flag=""
-      local auto_route_file="$config_dir/state/auto_route.txt"
+      local instance_auto_route="false"
+      local auto_route_file="$SING_RUN_INSTANCES_DIR/$region/state/auto_route.txt"
       if [[ -f "$auto_route_file" ]] && [[ "$(cat "$auto_route_file")" == "true" ]]; then
         auto_route_flag=" 🌐"
+        instance_auto_route="true"
       fi
+      read interface ip_cidr socks_port http_port config_dir <<< "$(_sing_instance_get_config "$region" "$instance_auto_route")"
       
       # Source info
       local source=$(_sing_source_get_instance "$region")

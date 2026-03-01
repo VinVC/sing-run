@@ -65,6 +65,7 @@ _sing_region_get_nodes() {
   
   if [[ ! -f "$proxies_file" ]]; then
     echo "错误: 找不到 $proxies_file" >&2
+    echo "请先更新节点: sing-run update-nodes $source" >&2
     return 1
   fi
   
