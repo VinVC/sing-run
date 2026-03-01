@@ -1,0 +1,38 @@
+#!/bin/zsh
+# sing-run 代理源配置
+# 复制此文件为 sources.sh 并根据实际情况修改:
+#   cp sources.sh.example sources.sh
+#
+# sources.sh 已被 .gitignore 忽略，不会提交到仓库
+
+# =============================================================================
+# 源定义 (每行一个源)
+# =============================================================================
+#
+# 格式: 显示名 | 短名 | 订阅URL
+#
+# - 显示名:  status 中展示的名称
+# - 短名:    命令中使用的标识符，也用于文件命名 (proxies-<短名>.yaml)
+# - 订阅URL: 用于 sing-run update-nodes (可省略)
+#
+# 颜色自动分配，无需配置
+#
+# 示例:
+#   sing-run start jp --source mp    (用短名指定源)
+#   sing-run update-nodes mp          (更新节点列表)
+
+SING_RUN_SOURCE_DEFS=(
+  "MyProvider | mp | https://example.com/subscribe?token=YOUR_TOKEN"
+  # "Another  | an | https://other.com/api/subscribe"
+)
+
+# =============================================================================
+# 可选配置
+# =============================================================================
+
+# 节点文件存储目录 (默认: ~/.sing-run)
+# 文件名自动生成: proxies-<短名>.yaml
+# SING_RUN_PROXIES_DIR="$HOME/.sing-run"
+
+# 节点名称过滤 (过滤掉非节点行，用 | 分隔)
+SING_RUN_NODE_FILTER_PATTERN="剩余流量|下次重置|套餐到期|用户群|使用说明"

@@ -1,0 +1,174 @@
+{
+    "log": {
+        "level": "info",
+        "output": "{{LOG_FILE}}",
+        "timestamp": true
+    },
+    "dns": {
+        "servers": [
+            {
+                "type": "https",
+                "tag": "proxy-dns",
+                "server": "8.8.8.8",
+                "detour": "proxy"
+            },
+            {
+                "type": "https",
+                "tag": "direct-dns",
+                "server": "223.5.5.5"
+            },
+            {
+                "type": "udp",
+                "tag": "internal-dns",
+                "server": "{{INTERNAL_DNS}}",
+                "server_port": 53
+            },
+            {
+                "type": "local",
+                "tag": "local-dns"
+            },
+            {
+                "type": "fakeip",
+                "tag": "block-dns",
+                "inet4_range": "240.0.0.0/4"
+            }
+        ],
+        "rules": [
+            {
+                "domain_suffix": [
+                    ".lan",
+                    ".local",
+                    ".internal",
+                    ".home",
+                    ".corp",
+                    ".localdomain",
+                    ".intranet",
+                    ".private"
+                ],
+                "server": "internal-dns"
+            },
+            "{{CUSTOM_DNS_RULES}}",
+            {
+                "rule_set": "ads",
+                "server": "block-dns"
+            },
+            {
+                "rule_set": "google",
+                "server": "proxy-dns"
+            },
+            {
+                "rule_set": "cn",
+                "server": "direct-dns"
+            }
+        ],
+        "final": "proxy-dns",
+        "strategy": "ipv4_only"
+    },
+    "inbounds": [
+        {
+            "type": "tun",
+            "tag": "tun-in",
+            "interface_name": "{{TUN_INTERFACE}}",
+            "address": [
+                "{{IP_CIDR}}"
+            ],
+            "mtu": 1400,
+            "auto_route": "{{AUTO_ROUTE}}",
+            "strict_route": true,
+            "stack": "mixed"
+        },
+        {
+            "type": "socks",
+            "tag": "socks-in",
+            "listen": "127.0.0.1",
+            "listen_port": "{{SOCKS_PORT}}"
+        },
+        {
+            "type": "http",
+            "tag": "http-in",
+            "listen": "127.0.0.1",
+            "listen_port": "{{HTTP_PORT}}"
+        }
+    ],
+    "outbounds": [
+        "{{OUTBOUND_CONFIG}}",
+        {
+            "type": "direct",
+            "tag": "direct"
+        }
+    ],
+    "route": {
+        "rule_set": [
+            {
+                "tag": "ads",
+                "type": "local",
+                "format": "binary",
+                "path": "{{RULESET_DIR}}/geosite-category-ads-all.srs"
+            },
+            {
+                "tag": "google",
+                "type": "local",
+                "format": "binary",
+                "path": "{{RULESET_DIR}}/geosite-google.srs"
+            },
+            {
+                "tag": "cn",
+                "type": "local",
+                "format": "binary",
+                "path": "{{RULESET_DIR}}/geosite-cn.srs"
+            },
+            {
+                "tag": "geoip-cn",
+                "type": "local",
+                "format": "binary",
+                "path": "{{RULESET_DIR}}/geoip-cn.srs"
+            }
+        ],
+        "rules": [
+            {
+                "action": "sniff"
+            },
+            {
+                "protocol": "dns",
+                "action": "hijack-dns"
+            },
+            {
+                "ip_is_private": true,
+                "outbound": "direct"
+            },
+            "{{CUSTOM_ROUTE_RULES}}",
+            {
+                "rule_set": "ads",
+                "action": "reject"
+            },
+            {
+                "ip_cidr": [
+                    "223.5.5.5/32",
+                    "223.6.6.6/32"
+                ],
+                "outbound": "direct"
+            },
+            {
+                "rule_set": "google",
+                "outbound": "proxy"
+            },
+            {
+                "rule_set": "cn",
+                "outbound": "direct"
+            },
+            {
+                "rule_set": "geoip-cn",
+                "outbound": "direct"
+            }
+        ],
+        "final": "proxy",
+        "auto_detect_interface": true,
+        "default_domain_resolver": "proxy-dns"
+    },
+    "experimental": {
+        "cache_file": {
+            "enabled": true,
+            "path": "{{CACHE_FILE}}"
+        }
+    }
+}
