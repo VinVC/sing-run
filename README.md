@@ -22,7 +22,12 @@
 ### 一键安装
 
 ```bash
-# 克隆后运行安装脚本
+curl -fsSL https://raw.githubusercontent.com/VinVC/sing-run/main/install.sh | bash
+```
+
+或手动克隆：
+
+```bash
 git clone https://github.com/VinVC/sing-run.git
 cd sing-run
 ./install.sh
