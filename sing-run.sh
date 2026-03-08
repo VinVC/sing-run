@@ -67,6 +67,14 @@ else
   echo "错误: 无法加载 sing-run-source.sh 模块" >&2
 fi
 
+# Load plugin framework and discover plugins from SING_PLUGIN_PATH
+if [[ -f "$SING_RUN_SCRIPT_DIR/sing-run-plugin.sh" ]]; then
+  source "$SING_RUN_SCRIPT_DIR/sing-run-plugin.sh"
+  _sing_plugin_load_all
+else
+  echo "错误: 无法加载 sing-run-plugin.sh 模块" >&2
+fi
+
 # =============================================================================
 # Help
 # =============================================================================
@@ -135,6 +143,17 @@ _sing_run_show_help() {
   sing-run --add-proxy <domain>     # 添加域名到代理列表
   sing-run --add-direct <domain>    # 添加域名到直连列表（本地 DNS + 直连）
   sing-run --del-rule <domain>      # 删除域名规则
+
+插件:
+  sing-run plugin                   # 查看已加载的插件
+EOF
+  local has_plugins=${#_sing_plugin_registry}
+  if [[ $has_plugins -gt 0 ]]; then
+    echo ""
+    echo "  已加载的插件命令 (sing-run <命令> -h 查看详情):"
+    _sing_plugin_help
+  fi
+  cat << 'EOF'
 
 可用地区:
   tw    台湾      hk    香港      jp    日本
@@ -462,17 +481,25 @@ sing-run() {
     return
   fi
   
+  # Plugin pre-command hook: let plugins intercept commands
+  _sing_plugin_pre_command "$@" && return 0
+  
   # Parse first argument
   case "$first_arg" in
     # Global commands
     stop|-x)
       if [[ -n "$2" ]]; then
-        # Stop specific region
         _sing_instance_stop "$2"
       else
-        # Stop all instances
+        _sing_plugin_stop_all
         _sing_instance_stop_all
       fi
+      ;;
+    plugin)
+      echo ""
+      echo "已加载的插件:"
+      _sing_plugin_list
+      echo ""
       ;;
     status)
       # Show all running instances

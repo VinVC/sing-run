@@ -155,6 +155,12 @@ sing-run update-rules                 # 更新内置路由规则集
 
 > 修改规则后会提示是否重启运行中的实例以生效。
 
+### 插件
+
+```bash
+sing-run plugin                       # 查看已加载的插件
+```
+
 ### 查看信息
 
 ```bash
@@ -442,10 +448,13 @@ sing-run/
 ├── sing-run-source.sh                 # 源查询、订阅更新
 ├── sing-run-rules.sh                  # 域名规则增删查
 ├── sing-run-template.sh               # sing-box JSON 配置生成
+├── sing-run-plugin.sh                 # 插件框架（注册、加载、钩子分发）
 ├── sing-run-system.sh                 # 进程管理、TUN 接口、规则集下载
 ├── sources.sh.example                 # 源配置模板
 ├── sources.sh                         # 用户源配置 (gitignore)
 ├── data/                              # 本地源数据文件 (gitignore)
+├── plugins/                           # 内置插件目录
+├── custom/                            # 私有插件目录 (gitignore)
 └── templates/
     ├── tun-template.json              # TUN 模式配置模板
     └── proxy-template.json            # 普通代理模式配置模板
@@ -463,6 +472,7 @@ sing-run/
 | 源管理 | `sing-run-source.sh` | 源查询、源文件管理、实例-源绑定、订阅更新与解析 |
 | 规则管理 | `sing-run-rules.sh` | 自定义代理/直连域名规则，生成 DNS 和路由规则 |
 | 模板引擎 | `sing-run-template.sh` | 基于模板生成 sing-box JSON 配置，注入自定义规则 |
+| 插件框架 | `sing-run-plugin.sh` | 插件发现、注册 API、钩子分发 |
 | 系统工具 | `sing-run-system.sh` | 进程管理、TUN 接口发现、规则集下载、DNS 检测 |
 
 ### 数据流
@@ -487,6 +497,7 @@ tun-template.json / proxy-template.json
     ├─ 注入自定义 DNS 规则 (直连域名 → 本地 DNS)
     ├─ 注入自定义路由规则 (代理/直连域名)
     ├─ 注入内置规则集 (广告、Google、中国域名)
+    ├─ 插件 post_config 钩子 (注入额外 outbound/路由/DNS 规则)
     └─→ config.json
 ```
 
@@ -497,6 +508,100 @@ tun-template.json / proxy-template.json
 3. **独立实例** - 每个区域实例完全独立（端口、接口、配置、日志）
 4. **显式源绑定** - 每个实例绑定到明确的代理源
 5. **状态保持** - 切换节点/源时自动保持 TUN 模式
+
+## 插件系统
+
+sing-run 通过注册式插件框架扩展功能，插件可以拦截命令、修改配置、注入状态显示等。
+
+### 插件格式
+
+支持两种格式：
+
+- **目录插件**：`<搜索路径>/<名称>/init.zsh`（推荐，可附带 `.env`、数据文件等）
+- **单文件插件**：`<搜索路径>/<名称>.zsh`
+
+### 搜索路径
+
+插件按以下顺序扫描加载：
+
+```
+SING_PLUGIN_PATH=(
+  "$SING_RUN_SCRIPT_DIR/plugins"   # 内置插件（随项目版本管理）
+  "$SING_RUN_SCRIPT_DIR/custom"    # 私有插件（gitignore，不随项目开源）
+  "$SING_RUN_DIR/plugins"          # 用户级插件（~/.sing-run/plugins/）
+)
+```
+
+可在 `source sing-run.sh` 前设置 `SING_PLUGIN_PATH` 自定义搜索路径。
+
+### 编写插件
+
+一个最小的目录插件结构：
+
+```
+my-plugin/
+├── init.zsh       # 入口（必需）
+├── .env           # 配置（可选，自动加载需插件自行实现）
+└── README.md      # 文档（可选）
+```
+
+`init.zsh` 示例：
+
+```zsh
+#!/bin/zsh
+
+# 1. 注册插件（名称 + 描述）
+sing_plugin "my-plugin" "一句话描述"
+
+# 2. 加载配置（SING_PLUGIN_DIR 指向插件自身目录）
+if [[ -f "$SING_PLUGIN_DIR/.env" ]]; then
+  source "$SING_PLUGIN_DIR/.env"
+fi
+
+# 3. 定义功能函数
+_myplugin_start() { echo "hello from my-plugin"; }
+
+# 4. 定义钩子实现
+_myplugin_pre_command() {
+  [[ "$1" == "my-cmd" ]] && { _myplugin_start; return 0; }
+  return 1
+}
+
+_myplugin_help() {
+  echo "我的插件:"
+  echo "  sing-run my-cmd                   # 执行插件命令"
+}
+
+# 5. 注册钩子
+sing_hook pre_command  _myplugin_pre_command
+sing_hook help         _myplugin_help
+```
+
+### 可用钩子
+
+| 钩子 | 签名 | 执行模式 | 说明 |
+|---|---|---|---|
+| `pre_command` | `func "$@"` → 返回 0 消费命令 | 竞争 | 拦截自定义命令 |
+| `post_config` | `func "$config" "$template" "$auto_route"` → 输出 JSON | 管道 | 修改 sing-box 配置 |
+| `status` | `func` → 输出文本 | 广播 | 在 `sing-run status` 中追加显示 |
+| `status_count` | `func` → 输出数字 | 求和 | 计入运行实例总数 |
+| `stop_all` | `func` | 广播 | `sing-run stop`（无参数）时执行清理 |
+| `help` | `func` → 输出文本 | 广播 | 在 `sing-run --help` 中追加帮助文本 |
+
+执行模式说明：
+
+- **竞争**：按注册顺序调用，首个返回 0 的处理器消费命令，后续不再调用
+- **管道**：上一个处理器的输出作为下一个的输入（用于配置变换链）
+- **广播**：所有处理器依次调用
+- **求和**：所有返回值累加
+
+### 上下文变量
+
+| 变量 | 可用时机 | 说明 |
+|---|---|---|
+| `SING_PLUGIN_DIR` | `init.zsh` 执行期间 | 插件自身目录的绝对路径 |
+| `SING_RUN_SCRIPT_DIR` | 始终 | sing-run 项目根目录 |
+| `SING_RUN_DIR` | 始终 | 数据目录（`~/.sing-run`） |
 
 ## 故障排查
 

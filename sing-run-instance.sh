@@ -118,13 +118,13 @@ _sing_instance_save_interface() {
 
 # Get instance configuration for a region
 # Returns: interface ip_cidr socks_port http_port config_dir
-# interface is only allocated for TUN mode (auto_route=true)
+# interface is "_" when TUN is not enabled; callers should treat "_" as empty
 _sing_instance_get_config() {
   local region="$1"
   local auto_route="${2:-false}"
   local instance_num=$(_sing_instance_region_to_num "$region")
   
-  local interface=""
+  local interface="_"
   if [[ "$auto_route" == "true" ]]; then
     interface=$(_sing_instance_alloc_interface "$region")
   fi
@@ -250,6 +250,7 @@ _sing_instance_gen_config() {
   
   # Get instance configuration
   read interface ip_cidr socks_port http_port config_dir <<< "$(_sing_instance_get_config "$region" "$auto_route")"
+  [[ "$interface" == "_" ]] && interface=""
   
   # Get source for this instance
   local source=$(_sing_source_get_instance "$region")
@@ -300,6 +301,11 @@ _sing_instance_gen_config() {
     echo "错误: 配置生成失败" >&2
     return 1
   fi
+  
+  # Plugin post-config hook: let plugins inject outbounds/routes
+  local template_name=""
+  [[ "$auto_route" == "true" ]] && template_name="tun" || template_name="proxy"
+  config=$(_sing_plugin_post_config "$config" "$template_name" "$auto_route")
   
   # Write configuration to file
   local config_file=$(_sing_instance_get_config_file "$region")
@@ -365,6 +371,7 @@ _sing_instance_start() {
   
   # Get instance configuration first (needed for config_dir)
   read interface ip_cidr socks_port http_port config_dir <<< "$(_sing_instance_get_config "$region" "$auto_route")"
+  [[ "$interface" == "_" ]] && interface=""
   
   # Ensure instance directories exist before any file operations
   _sing_instance_ensure_dirs "$region"
@@ -696,6 +703,7 @@ _sing_instance_status() {
         instance_auto_route="true"
       fi
       read interface ip_cidr socks_port http_port config_dir <<< "$(_sing_instance_get_config "$region" "$instance_auto_route")"
+      [[ "$interface" == "_" ]] && interface=""
       
       # Source info
       local source=$(_sing_source_get_instance "$region")
@@ -752,12 +760,18 @@ _sing_instance_status() {
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
   
+  local extra_count=$(_sing_plugin_status_count)
+  if [[ -n "$extra_count" && "$extra_count" -gt 0 ]] 2>/dev/null; then
+    running_count=$((running_count + extra_count))
+  fi
+  
   if [[ $running_count -eq 0 ]]; then
     echo "  没有运行中的实例"
   else
     for line in "${status_lines[@]}"; do
       echo -e "$line"
     done
+    _sing_plugin_status
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "  $running_count 个实例运行中"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
