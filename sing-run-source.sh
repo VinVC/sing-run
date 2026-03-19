@@ -276,6 +276,41 @@ _sing_source_list() {
 # Source Update (subscription download and parsing)
 # =============================================================================
 
+# Show help for update-nodes command
+_sing_source_update_help() {
+  cat << 'EOF'
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                    sing-run update-nodes - 更新节点订阅
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+用法:
+  sing-run update-nodes                  # 更新所有源
+  sing-run update-nodes all              # 更新所有源（同无参数）
+  sing-run update-nodes <源名称>         # 更新指定源
+  sing-run update-nodes -h, --help       # 显示此帮助
+
+源特定更新选项:
+  sing-run update-nodes <源> --url <URL>       # 从 URL 更新
+  sing-run update-nodes <源> --file <路径>     # 从本地文件更新
+  sing-run update-nodes <源> --string <BASE64> # 从 base64 字符串更新
+
+示例:
+  sing-run update-nodes                  # 更新所有配置的源
+  sing-run update-nodes iku              # 只更新 iku 源
+  sing-run update-nodes iku --url "https://example.com/sub"
+  sing-run update-nodes edn --file ~/nodes.txt
+
+说明:
+  此命令从订阅链接、本地文件或 base64 字符串获取节点信息，
+  并转换为 sing-box 可用的格式保存到 proxies-<源>.yaml。
+
+  若未指定更新方式，将按以下顺序查找:
+  1. 源配置中定义的订阅 URL
+  2. data/<源> 文件
+
+EOF
+}
+
 # Update a source's proxies YAML from subscription
 # Usage: _sing_source_update <source> [--url URL | --file PATH | --string BASE64]
 _sing_source_update() {

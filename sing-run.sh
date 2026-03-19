@@ -534,7 +534,10 @@ sing-run() {
     update-nodes)
       # Update source node subscription
       shift
-      if [[ -z "$1" ]]; then
+      # Check for help flag first
+      if [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]]; then
+        _sing_source_update_help
+      elif [[ -z "$1" ]]; then
         # No source specified: update all (single source = just update it)
         for s in "${SING_RUN_SOURCE_ORDER[@]}"; do
           _sing_source_update "$s"
