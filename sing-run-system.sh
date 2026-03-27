@@ -6,24 +6,34 @@
 # DNS Detection
 # =============================================================================
 
-# Get current system DNS server
+# Get primary system DNS server
 _sing_system_get_dns() {
-  local dns_server=""
-  
+  local servers=($(_sing_system_get_all_dns))
+  if [[ ${#servers[@]} -gt 0 ]]; then
+    echo "${servers[1]}"
+  else
+    echo "223.5.5.5"
+  fi
+}
+
+# Get all unique system DNS servers (one per line)
+_sing_system_get_all_dns() {
+  local -a servers=()
+
   if [[ "$OSTYPE" == "darwin"* ]]; then
-    # macOS: use scutil
-    dns_server=$(scutil --dns 2>/dev/null | grep "nameserver\[0\]" | head -1 | awk '{print $3}')
+    servers=($(scutil --dns 2>/dev/null | grep "nameserver" | awk '{print $3}' | sort -u))
   elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    # Linux: check /etc/resolv.conf
-    dns_server=$(grep -m1 "^nameserver" /etc/resolv.conf 2>/dev/null | awk '{print $2}')
+    servers=($(grep "^nameserver" /etc/resolv.conf 2>/dev/null | awk '{print $2}' | sort -u))
   fi
-  
-  # Fallback to public DNS if not detected
-  if [[ -z "$dns_server" ]]; then
-    dns_server="223.5.5.5"
+
+  if [[ ${#servers[@]} -eq 0 ]]; then
+    echo "223.5.5.5"
+    return
   fi
-  
-  echo "$dns_server"
+
+  for s in "${servers[@]}"; do
+    echo "$s"
+  done
 }
 
 # =============================================================================
