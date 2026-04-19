@@ -109,7 +109,7 @@ _sing_run_show_help() {
   sing-run jp --node next           # 日本切换下一个节点
   sing-run jp --node prev           # 日本切换上一个节点
   sing-run jp --node 5              # 日本切换到节点 5
-  sing-run jp nodes                 # 列出日本的所有节点
+  sing-run jp --nodes               # 列出日本的所有节点
 
 源操作（必须指定区域）:
   sing-run jp --source <源>         # 日本切换指定源
@@ -225,7 +225,7 @@ _sing_run_handle_region() {
         auto_route_arg="true"
         shift
         ;;
-      nodes)
+      --nodes)
         action="list_nodes"
         shift
         ;;
