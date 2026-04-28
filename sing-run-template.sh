@@ -318,9 +318,9 @@ _sing_template_generate_config() {
 
   # Use jq to merge outbound, custom route rules, custom DNS rules, and extra DNS servers
   # - Extra internal DNS servers are appended to dns.servers
-  # - Custom DNS rules are prepended (high priority, matched before ruleset rules)
-  # - Custom route rules are appended (after default rules)
-  # - String placeholders are filtered out via select(type == "object")
+  # - Custom DNS rules replace the {{CUSTOM_DNS_RULES}} placeholder in-place
+  # - Custom route rules replace the {{CUSTOM_ROUTE_RULES}} placeholder in-place
+  #   (preserving template order so custom rules sit before geoip-cn)
   local result=$(jq \
     --slurpfile outbound "$tmp_outbound" \
     --slurpfile custom_route "$tmp_route_custom" \
@@ -328,8 +328,8 @@ _sing_template_generate_config() {
     --slurpfile extra_dns "$tmp_extra_dns" \
     '.outbounds[0] = $outbound[0] | 
      .dns.servers = .dns.servers + $extra_dns[0] |
-     .dns.rules = ($custom_dns[0] + [.dns.rules[] | select(type == "object")]) |
-     .route.rules = ([.route.rules[] | select(type == "object")] + $custom_route[0])' \
+     .dns.rules = [.dns.rules[] | if type == "string" then $custom_dns[0][] else . end] |
+     .route.rules = [.route.rules[] | if type == "string" then $custom_route[0][] else . end]' \
     "$tmp_template" 2>&1)
   
   rm -f "$tmp_template" "$tmp_outbound" "$tmp_route_custom" "$tmp_dns_custom" "$tmp_extra_dns"

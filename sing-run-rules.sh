@@ -206,12 +206,16 @@ _sing_rules_list() {
   echo ""
   
   # Direct rules
-  echo "【直连域名】(本地 DNS 解析 + 直连路由)"
+  echo "【直连规则】"
   if [[ -f "$SING_RUN_DIRECT_RULES" ]] && [[ -s "$SING_RUN_DIRECT_RULES" ]]; then
     local count=0
-    while IFS= read -r domain; do
-      [[ -z "$domain" || "$domain" =~ ^# ]] && continue
-      echo "  → $domain (及所有子域名)"
+    while IFS= read -r entry; do
+      [[ -z "$entry" || "$entry" =~ ^# ]] && continue
+      if _sing_rules_is_ip "$entry"; then
+        echo "  → $entry  [IP]"
+      else
+        echo "  → $entry (及所有子域名)"
+      fi
       ((count++))
     done < "$SING_RUN_DIRECT_RULES"
     echo "  总计: $count 条规则"
@@ -297,30 +301,52 @@ _sing_rules_generate_route_rules() {
     fi
   fi
   
-  # Generate direct domain rules (using domain_suffix to match all subdomains)
+  # Generate direct rules (split IPs and domains)
   if [[ -f "$SING_RUN_DIRECT_RULES" ]] && [[ -s "$SING_RUN_DIRECT_RULES" ]]; then
     local direct_domains=()
-    while IFS= read -r domain; do
-      [[ -z "$domain" || "$domain" =~ ^# ]] && continue
-      direct_domains+=("$domain")
+    local direct_ips=()
+    while IFS= read -r entry; do
+      [[ -z "$entry" || "$entry" =~ ^# ]] && continue
+      if _sing_rules_is_ip "$entry"; then
+        direct_ips+=("$entry")
+      else
+        direct_domains+=("$entry")
+      fi
     done < "$SING_RUN_DIRECT_RULES"
-    
+
+    # Domain rule: use "domain_suffix" to match domain + all subdomains
     if [[ ${#direct_domains[@]} -gt 0 ]]; then
-      # Build domain_suffix array for JSON
       local domain_array=""
       for domain in "${direct_domains[@]}"; do
-        if [[ -n "$domain_array" ]]; then
-          domain_array+=",\n"
-        fi
+        [[ -n "$domain_array" ]] && domain_array+=",\n"
         domain_array+="        \"$domain\""
       done
-      
-      # Add direct rule (domain_suffix matches domain + all subdomains)
-      if [[ $has_rules -eq 1 ]]; then
-        rules_json+=",\n"
-      fi
+      [[ $has_rules -eq 1 ]] && rules_json+=",\n"
       rules_json+="      {\n"
       rules_json+="        \"domain_suffix\": [\n$domain_array\n        ],\n"
+      rules_json+="        \"outbound\": \"direct\"\n"
+      rules_json+="      }"
+      has_rules=1
+    fi
+
+    # IP rule: use "ip_cidr" field
+    if [[ ${#direct_ips[@]} -gt 0 ]]; then
+      local ip_array=""
+      for ip in "${direct_ips[@]}"; do
+        [[ -n "$ip_array" ]] && ip_array+=",\n"
+        if [[ "$ip" != */* ]]; then
+          if [[ "$ip" == *:* ]]; then
+            ip_array+="        \"$ip/128\""
+          else
+            ip_array+="        \"$ip/32\""
+          fi
+        else
+          ip_array+="        \"$ip\""
+        fi
+      done
+      [[ $has_rules -eq 1 ]] && rules_json+=",\n"
+      rules_json+="      {\n"
+      rules_json+="        \"ip_cidr\": [\n$ip_array\n        ],\n"
       rules_json+="        \"outbound\": \"direct\"\n"
       rules_json+="      }"
       has_rules=1
@@ -350,9 +376,11 @@ _sing_rules_generate_dns_rules() {
   fi
   
   local direct_domains=()
-  while IFS= read -r domain; do
-    [[ -z "$domain" || "$domain" =~ ^# ]] && continue
-    direct_domains+=("$domain")
+  while IFS= read -r entry; do
+    [[ -z "$entry" || "$entry" =~ ^# ]] && continue
+    # Skip IPs - DNS rules are only needed for domain names
+    _sing_rules_is_ip "$entry" && continue
+    direct_domains+=("$entry")
   done < "$SING_RUN_DIRECT_RULES"
   
   if [[ ${#direct_domains[@]} -eq 0 ]]; then
