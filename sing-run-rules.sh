@@ -37,13 +37,29 @@ _sing_rules_extract_domain() {
   domain="${domain%%\?*}"
   domain="${domain%%#*}"
   
-  # Remove port
-  domain="${domain%:*}"
+  # Remove port (only for non-IPv6 addresses)
+  if [[ "$domain" != \[* ]]; then
+    domain="${domain%:*}"
+  fi
   
   # Remove username:password@
   domain="${domain##*@}"
   
   echo "$domain"
+}
+
+# Check if a string is an IP address (IPv4 or IPv6)
+_sing_rules_is_ip() {
+  local input="$1"
+  # IPv4
+  if [[ "$input" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    return 0
+  fi
+  # IPv6 (contains colon)
+  if [[ "$input" =~ ^[0-9a-fA-F:]+$ ]] && [[ "$input" == *:* ]]; then
+    return 0
+  fi
+  return 1
 }
 
 # =============================================================================
@@ -75,7 +91,12 @@ _sing_rules_add_proxy() {
   
   # Add to proxy rules
   echo "$domain" >> "$SING_RUN_PROXY_RULES"
-  echo "✓ 已添加到代理列表: $domain"
+  if _sing_rules_is_ip "$domain"; then
+    echo "✓ 已添加 IP 到代理列表: $domain"
+    echo "  路由方式: ip_cidr 匹配 → 代理"
+  else
+    echo "✓ 已添加到代理列表: $domain"
+  fi
   
   return 0
 }
@@ -165,12 +186,16 @@ _sing_rules_list() {
   echo ""
   
   # Proxy rules
-  echo "【代理域名】"
+  echo "【代理规则】"
   if [[ -f "$SING_RUN_PROXY_RULES" ]] && [[ -s "$SING_RUN_PROXY_RULES" ]]; then
     local count=0
-    while IFS= read -r domain; do
-      [[ -z "$domain" || "$domain" =~ ^# ]] && continue
-      echo "  → $domain"
+    while IFS= read -r entry; do
+      [[ -z "$entry" || "$entry" =~ ^# ]] && continue
+      if _sing_rules_is_ip "$entry"; then
+        echo "  → $entry  [IP]"
+      else
+        echo "  → $entry"
+      fi
       ((count++))
     done < "$SING_RUN_PROXY_RULES"
     echo "  总计: $count 条规则"
@@ -200,7 +225,8 @@ _sing_rules_list() {
   echo "  代理: $SING_RUN_PROXY_RULES"
   echo "  直连: $SING_RUN_DIRECT_RULES"
   echo ""
-  echo "说明: 直连域名使用 domain_suffix 匹配 (包含所有子域名)"
+  echo "说明: 代理/直连规则支持域名和 IP 地址"
+  echo "      域名使用 domain/domain_suffix 匹配，IP 使用 ip_cidr 匹配"
   echo "      直连域名的 DNS 由本地路由器解析 (适用于内网域名)"
   echo "      规则对所有实例生效，修改后需重启实例"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -218,30 +244,53 @@ _sing_rules_generate_route_rules() {
   local rules_json=""
   local has_rules=0
   
-  # Generate proxy domain rules
+  # Generate proxy rules (split IPs and domains)
   if [[ -f "$SING_RUN_PROXY_RULES" ]] && [[ -s "$SING_RUN_PROXY_RULES" ]]; then
     local proxy_domains=()
-    while IFS= read -r domain; do
-      [[ -z "$domain" || "$domain" =~ ^# ]] && continue
-      proxy_domains+=("$domain")
+    local proxy_ips=()
+    while IFS= read -r entry; do
+      [[ -z "$entry" || "$entry" =~ ^# ]] && continue
+      if _sing_rules_is_ip "$entry"; then
+        proxy_ips+=("$entry")
+      else
+        proxy_domains+=("$entry")
+      fi
     done < "$SING_RUN_PROXY_RULES"
     
+    # Domain rule: use "domain" field
     if [[ ${#proxy_domains[@]} -gt 0 ]]; then
-      # Build domain array for JSON
       local domain_array=""
       for domain in "${proxy_domains[@]}"; do
-        if [[ -n "$domain_array" ]]; then
-          domain_array+=",\n"
-        fi
+        [[ -n "$domain_array" ]] && domain_array+=",\n"
         domain_array+="        \"$domain\""
       done
-      
-      # Add proxy rule
-      if [[ $has_rules -eq 1 ]]; then
-        rules_json+=",\n"
-      fi
+      [[ $has_rules -eq 1 ]] && rules_json+=",\n"
       rules_json+="      {\n"
       rules_json+="        \"domain\": [\n$domain_array\n        ],\n"
+      rules_json+="        \"outbound\": \"proxy\"\n"
+      rules_json+="      }"
+      has_rules=1
+    fi
+    
+    # IP rule: use "ip_cidr" field
+    if [[ ${#proxy_ips[@]} -gt 0 ]]; then
+      local ip_array=""
+      for ip in "${proxy_ips[@]}"; do
+        [[ -n "$ip_array" ]] && ip_array+=",\n"
+        # Append /32 for bare IPv4, /128 for bare IPv6 if no prefix given
+        if [[ "$ip" != */* ]]; then
+          if [[ "$ip" == *:* ]]; then
+            ip_array+="        \"$ip/128\""
+          else
+            ip_array+="        \"$ip/32\""
+          fi
+        else
+          ip_array+="        \"$ip\""
+        fi
+      done
+      [[ $has_rules -eq 1 ]] && rules_json+=",\n"
+      rules_json+="      {\n"
+      rules_json+="        \"ip_cidr\": [\n$ip_array\n        ],\n"
       rules_json+="        \"outbound\": \"proxy\"\n"
       rules_json+="      }"
       has_rules=1
