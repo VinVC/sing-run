@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/bash
 # sing-run-template.sh: JSON template processing for sing-run
 # Provides template-based configuration generation
 
@@ -149,7 +149,7 @@ _sing_ruleset_ensure() {
   mkdir -p "$SING_RUN_RULESET_DIR"
   
   local missing=()
-  for filename in "${(k)SING_RUN_RULESET_URLS[@]}"; do
+  for filename in "${!SING_RUN_RULESET_URLS[@]}"; do
     if [[ ! -f "$SING_RUN_RULESET_DIR/$filename" ]]; then
       missing+=("$filename")
     fi
@@ -186,7 +186,7 @@ _sing_ruleset_update() {
   
   echo "📥 更新路由规则集..."
   local failed=0
-  for filename in "${(k)SING_RUN_RULESET_URLS[@]}"; do
+  for filename in "${!SING_RUN_RULESET_URLS[@]}"; do
     printf "  %-45s " "$filename"
     if _sing_ruleset_download_one "$filename"; then
       echo "✓"

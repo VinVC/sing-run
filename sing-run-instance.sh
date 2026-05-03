@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/bash
 # sing-run-instance.sh: Instance management for sing-run
 # Supports running multiple regions simultaneously with different TUN interfaces
 
@@ -46,7 +46,7 @@ _sing_instance_find_utun() {
   
   # Collect interfaces already claimed by other running instances
   local -a claimed_interfaces=()
-  for region in "${(k)SING_RUN_REGIONS[@]}"; do
+  for region in "${!SING_RUN_REGIONS[@]}"; do
     [[ "$region" == "$exclude_region" ]] && continue
     local iface_file="$SING_RUN_INSTANCES_DIR/$region/state/interface.txt"
     if [[ -f "$iface_file" ]] && _sing_instance_is_running "$region"; then
@@ -84,7 +84,7 @@ _sing_instance_alloc_interface() {
     local conflict=false
     
     # Check if another running instance is using this interface
-    for other_region in "${(k)SING_RUN_REGIONS[@]}"; do
+    for other_region in "${!SING_RUN_REGIONS[@]}"; do
       [[ "$other_region" == "$region" ]] && continue
       local other_file="$SING_RUN_INSTANCES_DIR/$other_region/state/interface.txt"
       if [[ -f "$other_file" ]] && _sing_instance_is_running "$other_region"; then
@@ -327,7 +327,7 @@ _sing_instance_start() {
   # Validate region
   if [[ -z "${SING_RUN_REGIONS[$region]}" ]]; then
     echo "错误: 未知的地区代码 '$region'"
-    echo "可用地区: ${(k)SING_RUN_REGIONS[@]}"
+    echo "可用地区: ${!SING_RUN_REGIONS[@]}"
     return 1
   fi
   
@@ -347,7 +347,7 @@ _sing_instance_start() {
   
   # Enforce auto_route exclusivity: only one instance can have auto_route
   if [[ "$auto_route" == "true" ]]; then
-    for other_region in "${(k)SING_RUN_REGIONS[@]}"; do
+    for other_region in "${!SING_RUN_REGIONS[@]}"; do
       [[ "$other_region" == "$region" ]] && continue
       if _sing_instance_is_running "$other_region"; then
         local other_auto_route_file="$SING_RUN_INSTANCES_DIR/$other_region/state/auto_route.txt"
@@ -628,7 +628,7 @@ _sing_instance_restart() {
 _sing_instance_restart_all() {
   local running_regions=()
   
-  for region in "${(k)SING_RUN_REGIONS[@]}"; do
+  for region in "${!SING_RUN_REGIONS[@]}"; do
     if _sing_instance_is_running "$region"; then
       running_regions+=("$region")
     fi
@@ -656,7 +656,7 @@ _sing_instance_stop_all() {
   local stopped_count=0
   local failed_count=0
   
-  for region in "${(k)SING_RUN_REGIONS[@]}"; do
+  for region in "${!SING_RUN_REGIONS[@]}"; do
     if _sing_instance_is_running "$region"; then
       if _sing_instance_stop "$region"; then
         ((stopped_count++))

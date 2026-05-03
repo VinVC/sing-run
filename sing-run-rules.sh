@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/bash
 # sing-run-rules.sh: Domain rules management for sing-run
 # Manages custom routing rules for proxy and direct connections
 

@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/bash
 # sing-run-plugin: Registration-based plugin framework
 #
 # Plugin format:
@@ -121,7 +121,8 @@ _sing_plugin_load_all() {
     [[ -d "$dir" ]] || continue
 
     # Directory plugins: <dir>/<name>/init.zsh
-    for plugin_path in "$dir"/*/init.zsh(N); do
+    shopt -s nullglob
+    for plugin_path in "$dir"/*/init.zsh; do
       SING_PLUGIN_DIR="${plugin_path:h}"
       source "$plugin_path"
     done

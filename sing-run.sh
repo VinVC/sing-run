@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/bash
 # sing-run: Independent sing-box TUN manager
 # Native implementation without external dependencies
 
@@ -14,7 +14,7 @@ SING_RUN_DIR="$HOME/.sing-run"
 
 # Get the directory where this script is located
 # Use %x to get sourced script path in zsh
-SING_RUN_SCRIPT_DIR="${${(%):-%x}:A:h}"
+SING_RUN_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Load user source configuration (must be before other modules)
 if [[ -f "$SING_RUN_SCRIPT_DIR/sources.sh" ]]; then
@@ -294,7 +294,7 @@ _sing_run_handle_region() {
 _sing_run_disable_auto_route() {
   local found=0
   
-  for region in "${(k)SING_RUN_REGIONS[@]}"; do
+  for region in "${!SING_RUN_REGIONS[@]}"; do
     local auto_route_file="$SING_RUN_INSTANCES_DIR/$region/state/auto_route.txt"
     if [[ -f "$auto_route_file" ]] && [[ "$(cat "$auto_route_file")" == "true" ]] && _sing_instance_is_running "$region"; then
       found=1
@@ -321,7 +321,7 @@ _sing_run_disable_auto_route() {
 _sing_run_prompt_restart() {
   # Check if any instances are running
   local running_regions=()
-  for region in "${(k)SING_RUN_REGIONS[@]}"; do
+  for region in "${!SING_RUN_REGIONS[@]}"; do
     if _sing_instance_is_running "$region"; then
       running_regions+=("$region")
     fi
@@ -581,3 +581,7 @@ sing-run() {
       ;;
   esac
 }
+
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  sing-run "$@"
+fi

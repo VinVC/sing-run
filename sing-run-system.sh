@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/bash
 # sing-run-system.sh: System utilities for sing-run
 # Provides system integration functions (DNS, network interfaces, etc.)
 

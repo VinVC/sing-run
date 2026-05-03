@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/bash
 # sing-run-region.sh: Region and node management for sing-run
 # This module handles region switching and per-region node index management
 

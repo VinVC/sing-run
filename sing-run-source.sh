@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/bash
 # sing-run-source.sh: Source management for sing-run
 # This module handles proxy source selection and management
 #
@@ -28,7 +28,7 @@ _sing_source_parse_defs() {
   local def
   for def in "${SING_RUN_SOURCE_DEFS[@]}"; do
     # Split by | and trim whitespace
-    local parts=(${(s:|:)def})
+    IFS="|" read -ra parts <<< "$def"|:)def})
     local name="${${parts[1]## }% }"
     local code="${${parts[2]}// /}"
     local url="${${parts[3]## }% }"
