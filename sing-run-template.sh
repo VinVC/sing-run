@@ -35,15 +35,16 @@ _sing_template_generate_outbound() {
   local node_line="$1"
   
   # Parse node information
-  local node_parts=("${(@s[::::])node_line}")
-  local node_name="${node_parts[1]}"
-  local node_type="${node_parts[2]}"
-  local node_server="${node_parts[3]}"
-  local node_port="${node_parts[4]}"
-  local node_uuid="${node_parts[5]}"
-  local node_password="${node_parts[6]}"
-  local node_cipher="${node_parts[7]}"
-  local node_alter_id="${node_parts[8]}"
+  # Bash: replace zsh ${(@s[::::])} with IFS read
+  IFS="::::" read -ra node_parts <<< "$node_line"
+  local node_name="${node_parts[0]}"
+  local node_type="${node_parts[1]}"
+  local node_server="${node_parts[2]}"
+  local node_port="${node_parts[3]}"
+  local node_uuid="${node_parts[4]}"
+  local node_password="${node_parts[5]}"
+  local node_cipher="${node_parts[6]}"
+  local node_alter_id="${node_parts[7]}"
   
   # Generate JSON based on node type
   # Note: "domain_resolver": "direct-dns" is critical to avoid DNS loopback.

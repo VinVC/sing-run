@@ -405,8 +405,8 @@ _sing_instance_start() {
   done <<< "$nodes_output"
   
   local node_line="${nodes[$((node_index + 1))]}"
-  local node_parts=("${(@s[::::])node_line}")
-  local node_name="${node_parts[1]}"
+  IFS="::::" read -ra node_parts <<< "$node_line"
+  local node_name="${node_parts[0]}"
   
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

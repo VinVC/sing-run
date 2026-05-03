@@ -163,6 +163,7 @@ _sing_system_is_port_listening() {
 _sing_system_cleanup() {
   # Cleanup logic if needed
   # Silent cleanup - don't print messages
+  :  # no-op: bash requires at least one command in function body
 }
 
 # Register cleanup on script exit (only for INT and TERM, not EXIT)

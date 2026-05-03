@@ -128,10 +128,14 @@ _sing_plugin_load_all() {
     done
 
     # Single-file plugins: <dir>/<name>.zsh (skip init.zsh in subdirs)
-    for plugin_path in "$dir"/*.zsh(N); do
-      SING_PLUGIN_DIR="${plugin_path:h}"
+    # Bash: remove zsh (N) glob qualifier; use nullglob + existence check
+    shopt -s nullglob
+    for plugin_path in "$dir"/*.zsh; do
+      [[ -f "$plugin_path" ]] || continue
+      SING_PLUGIN_DIR="$(dirname "$plugin_path")"
       source "$plugin_path"
     done
+    shopt -u nullglob
   done
 
   unset SING_PLUGIN_DIR

@@ -28,10 +28,11 @@ _sing_source_parse_defs() {
   local def
   for def in "${SING_RUN_SOURCE_DEFS[@]}"; do
     # Split by | and trim whitespace
-    IFS="|" read -ra parts <<< "$def"|:)def})
-    local name="${${parts[1]## }% }"
-    local code="${${parts[2]}// /}"
-    local url="${${parts[3]## }% }"
+    # Bash: split by | (no here-string garbage, fix array indices 1→0, 2→1, 3→2)
+    IFS="|" read -ra parts <<< "$def"
+    local name="${parts[0]# }"; name="${name% }"
+    local code="${parts[1]// /}"
+    local url="${parts[2]# }"; url="${url% }"
 
     [[ -z "$code" ]] && continue
 
