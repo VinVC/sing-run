@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/bash
 # sing-run 代理源配置
 # 复制此文件为 sources.sh 并根据实际情况修改:
 #   cp sources.sh.example sources.sh

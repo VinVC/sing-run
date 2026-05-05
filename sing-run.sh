@@ -13,8 +13,15 @@ SING_RUN_DIR="$HOME/.sing-run"
 # =============================================================================
 
 # Get the directory where this script is located
-# Use %x to get sourced script path in zsh
-SING_RUN_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Works in both bash (BASH_SOURCE) and zsh (funcfiletrace or $0:A)
+if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+  SING_RUN_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+elif [[ -n "${ZSH_VERSION:-}" ]]; then
+  # %x = path of current file being sourced; :A = resolve symlinks/relative
+  SING_RUN_SCRIPT_DIR="${${(%):-%x}:A:h}"
+else
+  SING_RUN_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+fi
 
 # Load user source configuration (must be before other modules)
 if [[ -f "$SING_RUN_SCRIPT_DIR/sources.sh" ]]; then
