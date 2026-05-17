@@ -1,0 +1,7 @@
+.git
+.gitignore
+sources.sh
+data/
+custom/
+*.md
+LICENSE

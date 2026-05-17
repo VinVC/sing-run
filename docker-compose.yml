@@ -1,0 +1,92 @@
+# sing-run Docker Compose 示例
+#
+# 使用方法:
+#   1. 复制 sources.sh.example 为 sources.sh 并配置订阅源
+#   2. 更新节点:  docker compose run --rm jp update-nodes
+#   3. 启动区域:  docker compose up -d jp
+#   4. 查看日志:  docker compose logs -f jp
+#   5. 停止:      docker compose down
+#
+# 启动多个区域:
+#   docker compose up -d jp usa tw
+#
+# 管理命令 (通过任意服务运行):
+#   docker compose run --rm jp sources        # 查看可用源
+#   docker compose run --rm jp regions        # 查看可用区域
+#   docker compose run --rm jp update-nodes   # 更新所有节点
+#   docker compose run --rm jp update-rules   # 更新路由规则集
+
+services:
+  jp:
+    build:
+      context: .
+      args:
+        SING_BOX_VERSION: "1.11.0"
+    command: ["jp"]
+    volumes:
+      - ./sources.sh:/app/sources.sh:ro
+      - sing-run-data:/data
+    ports:
+      - "7810:7810"   # SOCKS
+      - "7811:7811"   # HTTP
+    restart: unless-stopped
+
+  # 取消注释以启用其他区域
+  # usa:
+  #   build:
+  #     context: .
+  #     args:
+  #       SING_BOX_VERSION: "1.11.0"
+  #   command: ["usa"]
+  #   volumes:
+  #     - ./sources.sh:/app/sources.sh:ro
+  #     - sing-run-data:/data
+  #   ports:
+  #     - "7800:7800"
+  #     - "7801:7801"
+  #   restart: unless-stopped
+
+  # tw:
+  #   build:
+  #     context: .
+  #     args:
+  #       SING_BOX_VERSION: "1.11.0"
+  #   command: ["tw"]
+  #   volumes:
+  #     - ./sources.sh:/app/sources.sh:ro
+  #     - sing-run-data:/data
+  #   ports:
+  #     - "7830:7830"
+  #     - "7831:7831"
+  #   restart: unless-stopped
+
+  # hk:
+  #   build:
+  #     context: .
+  #     args:
+  #       SING_BOX_VERSION: "1.11.0"
+  #   command: ["hk"]
+  #   volumes:
+  #     - ./sources.sh:/app/sources.sh:ro
+  #     - sing-run-data:/data
+  #   ports:
+  #     - "7820:7820"
+  #     - "7821:7821"
+  #   restart: unless-stopped
+
+  # sg:
+  #   build:
+  #     context: .
+  #     args:
+  #       SING_BOX_VERSION: "1.11.0"
+  #   command: ["sg"]
+  #   volumes:
+  #     - ./sources.sh:/app/sources.sh:ro
+  #     - sing-run-data:/data
+  #   ports:
+  #     - "7840:7840"
+  #     - "7841:7841"
+  #   restart: unless-stopped
+
+volumes:
+  sing-run-data:

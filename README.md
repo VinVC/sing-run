@@ -52,6 +52,74 @@ cd sing-run
 brew install sing-box yq jq
 ```
 
+### Docker 安装
+
+不需要 zsh 环境，只需 Docker。每个区域作为独立容器运行，Docker 管理生命周期。
+
+> Docker 模式仅支持 SOCKS/HTTP 端口代理，不支持 TUN 透明代理。
+
+**快速开始：**
+
+```bash
+git clone https://github.com/VinVC/sing-run.git
+cd sing-run
+
+# 1. 创建源配置
+cp sources.sh.example sources.sh
+vim sources.sh     # 添加你的订阅 URL
+
+# 2. 构建镜像
+docker compose build
+
+# 3. 更新节点
+docker compose run --rm jp update-nodes
+
+# 4. 启动日本区域
+docker compose up -d jp
+```
+
+**自定义 sing-box 版本：**
+
+```bash
+docker compose build --build-arg SING_BOX_VERSION=1.12.0
+```
+
+**管理命令：**
+
+```bash
+docker compose run --rm jp sources        # 查看可用源
+docker compose run --rm jp regions        # 查看可用区域
+docker compose run --rm jp update-nodes   # 更新所有节点
+docker compose run --rm jp update-rules   # 更新路由规则集
+```
+
+**多区域并发：** 编辑 `docker-compose.yml`，取消注释需要的区域，然后：
+
+```bash
+docker compose up -d jp usa tw
+```
+
+**直接使用 `docker run`：**
+
+```bash
+# 更新节点
+docker run --rm -v ./sources.sh:/app/sources.sh:ro -v sing-run-data:/data sing-run update-nodes
+
+# 启动日本代理
+docker run -d --name sing-run-jp \
+  -v ./sources.sh:/app/sources.sh:ro \
+  -v sing-run-data:/data \
+  -p 7810:7810 -p 7811:7811 \
+  sing-run jp
+
+# 指定源和节点
+docker run -d --name sing-run-usa \
+  -v ./sources.sh:/app/sources.sh:ro \
+  -v sing-run-data:/data \
+  -p 7800:7800 -p 7801:7801 \
+  sing-run usa --source mp --node 2
+```
+
 ### 源配置
 
 首次使用前，编辑源配置文件（安装脚本已自动创建）：
