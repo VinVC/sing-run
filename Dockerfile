@@ -1,7 +1,7 @@
 FROM alpine:3.21
 
 ARG TARGETARCH
-ARG SING_BOX_VERSION=1.11.0
+ARG SING_BOX_VERSION=1.12.12
 
 RUN apk add --no-cache \
     zsh \
