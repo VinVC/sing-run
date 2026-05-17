@@ -221,9 +221,11 @@ _sing_template_generate_config() {
   local config_dir="$7"
   local auto_route="${8:-false}"
   
-  # Select template based on TUN mode
+  # Select template based on mode
   if [[ "$auto_route" == "true" ]]; then
     template_name="tun-template"
+  elif [[ "${SING_RUN_REVERSE:-}" == "true" ]]; then
+    template_name="reverse-proxy-template"
   else
     template_name="proxy-template"
   fi

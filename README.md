@@ -54,11 +54,11 @@ brew install sing-box yq jq
 
 ### Docker 安装
 
-不需要 zsh 环境，只需 Docker。每个区域作为独立容器运行，Docker 管理生命周期。
+不需要 zsh 环境，只需 Docker。支持两种运行模式：本地代理和海外网关（Reverse 模式）。
 
 > Docker 模式仅支持 SOCKS/HTTP 端口代理，不支持 TUN 透明代理。
 
-**快速开始：**
+#### 快速开始
 
 ```bash
 git clone https://github.com/VinVC/sing-run.git
@@ -72,10 +72,10 @@ vim sources.sh     # 添加你的订阅 URL
 docker compose build
 
 # 3. 更新节点
-docker compose run --rm jp update-nodes
+docker compose run --rm sing-run update-nodes
 
-# 4. 启动日本区域
-docker compose up -d jp
+# 4. 启动（默认日本区域，见 docker-compose.yml）
+docker compose up -d
 ```
 
 **自定义 sing-box 版本：**
@@ -84,28 +84,122 @@ docker compose up -d jp
 docker compose build --build-arg SING_BOX_VERSION=1.12.0
 ```
 
-**管理命令：**
+#### 运行模式
+
+| 模式 | 场景 | 端口 | 路由逻辑 |
+|------|------|------|---------|
+| 默认模式 | 本地/国内使用，出国代理 | 区域端口（7810/7811 等） | 中国直连，非中国走代理 |
+| Reverse 模式 | 海外服务器网关，回国代理 | 固定 7890/7891 | 中国走代理，非中国直连 |
+
+默认模式下，每个区域使用各自的端口（见 [可用区域](#可用区域)）。Reverse 模式使用固定端口，不随区域变化。
+
+#### Reverse 模式（海外网关）
+
+适用场景：海外服务器需要访问中国大陆 API（AKShare、CLS 等），其他流量直连。
+
+使用方式一：修改 `docker-compose.yml`（推荐，见注释中的 `sing-run-gateway` 服务），然后：
 
 ```bash
-docker compose run --rm jp sources        # 查看可用源
-docker compose run --rm jp regions        # 查看可用区域
-docker compose run --rm jp update-nodes   # 更新所有节点
-docker compose run --rm jp update-rules   # 更新路由规则集
+docker compose up -d sing-run-gateway
 ```
 
-**多区域并发：** 编辑 `docker-compose.yml`，取消注释需要的区域，然后：
+使用方式二：直接 `docker run`：
 
 ```bash
-docker compose up -d jp usa tw
+docker run -d --name sing-run-gateway \
+  -v ./sources.sh:/app/sources.sh:ro \
+  -v sing-run-data:/data \
+  -p 7890:7890 -p 7891:7891 \
+  -e SING_RUN_REGION=tw \
+  sing-run --reverse
 ```
 
-**直接使用 `docker run`：**
+验证代理是否工作：
+
+```bash
+# 测试中国大陆域名（应通过代理节点回国）
+curl -x http://127.0.0.1:7891 https://push2.eastmoney.com/api/qt/ulist.np/get
+
+# 测试海外域名（应直连）
+curl -x http://127.0.0.1:7891 https://api.github.com
+```
+
+路由逻辑（与默认模式相反）：
+- 中国域名/IP → 通过代理节点回国
+- Google 等外国域名/IP → 直连
+- 默认出口 → 直连
+
+DNS 设计：中国域名通过代理节点出口解析（223.5.5.5），确保 CDN 返回最优 IP。
+
+固定端口设计：Reverse 模式下，SOCKS 始终 `7890`、HTTP 始终 `7891`，无论选择哪个区域。这样作为网关时，其他容器的 `HTTP_PROXY=http://sing-run:7891` 永远不变。
+
+#### 环境变量
+
+Docker 模式支持通过环境变量控制区域、节点和源，优先级高于 command 参数：
+
+| 变量 | 作用 | 默认 | 示例 |
+|------|------|------|------|
+| `SING_RUN_REGION` | 区域 | 无（使用 command 参数） | `tw`, `hk`, `jp`, `sg` |
+| `SING_RUN_NODE` | 节点 | 上次使用的节点 | `0`, `3`, `next`, `prev` |
+| `SING_RUN_SOURCE` | 订阅源 | 上次使用的源 | `mp`, `an` |
+| `SING_RUN_REVERSE` | Reverse 模式 | 无（由 `--reverse` 设置） | `true` |
+
+节点状态持久化在 Docker volume 中，`next`/`prev` 基于上次位置递增。
+
+#### 切换区域 / 节点 / 源
+
+只需修改环境变量并重启 sing-run 容器，其他容器无感：
+
+```bash
+# 切区域
+SING_RUN_REGION=hk docker compose up -d sing-run
+
+# 同区域换节点（换 IP）
+SING_RUN_NODE=next docker compose up -d sing-run
+
+# 切源（换机场）
+SING_RUN_SOURCE=mp docker compose up -d sing-run
+
+# 组合使用
+SING_RUN_REGION=jp SING_RUN_NODE=0 docker compose up -d sing-run
+```
+
+也可以写在 `.env` 文件中，修改后 `docker compose up -d sing-run` 即可。
+
+#### 作为 Docker Compose 网关
+
+在海外 VPS 上，sing-run 可以作为其他容器的透明代理网关。应用容器通过 `HTTP_PROXY` 环境变量自动将流量发送到 sing-run，由 sing-box 规则自动分流。完整示例见 [场景五：海外服务器网关](#场景五海外服务器网关docker)。
+
+关键要点：
+
+- sing-run 使用 `--reverse` + `expose` 暴露固定端口 7891（不用 `ports`，仅限容器间通信）
+- 应用容器设置 `HTTP_PROXY=http://sing-run:7891`、`HTTPS_PROXY=http://sing-run:7891`
+- `NO_PROXY` 排除所有容器间服务名，避免内部请求绕行代理
+- Python `requests`、`httpx`、`aiohttp` 均自动读取 `HTTP_PROXY`，应用代码无需修改
+- 切换区域/节点/源只需 `docker compose up -d sing-run`，其他容器不受影响
+
+#### 管理命令
+
+```bash
+docker compose run --rm sing-run sources        # 查看可用源
+docker compose run --rm sing-run regions        # 查看可用区域
+docker compose run --rm sing-run update-nodes   # 更新所有节点
+docker compose run --rm sing-run update-rules   # 更新路由规则集
+```
+
+查看当前区域的节点列表：
+
+```bash
+docker compose exec sing-run zsh -c 'source /app/sing-run.sh && sing-run tw nodes'
+```
+
+#### 直接使用 `docker run`
 
 ```bash
 # 更新节点
 docker run --rm -v ./sources.sh:/app/sources.sh:ro -v sing-run-data:/data sing-run update-nodes
 
-# 启动日本代理
+# 默认模式：启动日本代理
 docker run -d --name sing-run-jp \
   -v ./sources.sh:/app/sources.sh:ro \
   -v sing-run-data:/data \
@@ -113,11 +207,20 @@ docker run -d --name sing-run-jp \
   sing-run jp
 
 # 指定源和节点
-docker run -d --name sing-run-usa \
+docker run -d --name sing-run-jp \
   -v ./sources.sh:/app/sources.sh:ro \
   -v sing-run-data:/data \
-  -p 7800:7800 -p 7801:7801 \
-  sing-run usa --source mp --node 2
+  -p 7810:7810 -p 7811:7811 \
+  -e SING_RUN_SOURCE=mp -e SING_RUN_NODE=2 \
+  sing-run jp
+
+# Reverse 模式
+docker run -d --name sing-run-gateway \
+  -v ./sources.sh:/app/sources.sh:ro \
+  -v sing-run-data:/data \
+  -p 7890:7890 -p 7891:7891 \
+  -e SING_RUN_REGION=tw \
+  sing-run --reverse
 ```
 
 ### 源配置
@@ -480,6 +583,44 @@ sing-run --add-direct corp.internal.com
 # 重启生效后，内网和外网同时可用
 ```
 
+### 场景五：海外服务器网关（Docker）
+
+海外 VPS 上的多个服务需要访问中国大陆 API，使用 sing-run 作为透明代理网关：
+
+```yaml
+# docker-compose.yml
+services:
+  sing-run:
+    build: { context: /path/to/sing-run }
+    command: ["--reverse"]
+    environment:
+      - SING_RUN_REGION=${SING_RUN_REGION:-tw}
+    volumes:
+      - ./sources.sh:/app/sources.sh:ro
+      - sing-run-data:/data
+    expose: ["7891"]
+    restart: unless-stopped
+
+  my-app:
+    image: my-app:latest
+    environment:
+      - HTTP_PROXY=http://sing-run:7891
+      - HTTPS_PROXY=http://sing-run:7891
+      - NO_PROXY=localhost,127.0.0.1,sing-run,postgres,redis
+    depends_on: [sing-run]
+```
+
+```bash
+# 切区域（只重启 sing-run，my-app 无感）
+SING_RUN_REGION=hk docker compose up -d sing-run
+
+# 同区域换节点（换 IP）
+SING_RUN_NODE=next docker compose up -d sing-run
+
+# 查看 sing-run 日志
+docker compose logs -f sing-run
+```
+
 ## 文件结构
 
 ### 数据目录
@@ -520,12 +661,17 @@ sing-run/
 ├── sing-run-system.sh                 # 进程管理、TUN 接口、规则集下载
 ├── sources.sh.example                 # 源配置模板
 ├── sources.sh                         # 用户源配置 (gitignore)
+├── Dockerfile                         # Docker 镜像定义
+├── docker-entrypoint.sh               # Docker 容器入口脚本
+├── docker-compose.yml                 # Docker Compose 示例
+├── .dockerignore                      # Docker 构建排除规则
 ├── data/                              # 本地源数据文件 (gitignore)
 ├── plugins/                           # 内置插件目录
 ├── custom/                            # 私有插件目录 (gitignore)
 └── templates/
     ├── tun-template.json              # TUN 模式配置模板
-    └── proxy-template.json            # 普通代理模式配置模板
+    ├── proxy-template.json            # 普通代理模式配置模板
+    └── reverse-proxy-template.json    # Reverse 模式配置模板（海外网关）
 ```
 
 ## 架构
@@ -727,6 +873,39 @@ sing-run jp nodes
 # 切换到其他源
 sing-run jp --source mp
 ```
+
+### Docker：容器启动后立刻退出
+
+```bash
+# 查看容器日志
+docker compose logs sing-run
+
+# 常见原因：
+# 1. sources.sh 未挂载或为空 → 检查 volumes 挂载
+# 2. 节点未更新 → docker compose run --rm sing-run update-nodes
+# 3. 区域代码错误 → docker compose run --rm sing-run regions
+```
+
+### Docker：代理不通
+
+```bash
+# 1. 确认容器正在运行
+docker compose ps sing-run
+
+# 2. 从其他容器测试连通性
+docker compose exec my-app curl -x http://sing-run:7891 https://www.baidu.com
+
+# 3. 确认 NO_PROXY 没有包含目标域名
+# 4. 查看 sing-box 日志确认路由是否命中
+docker compose logs --tail 50 sing-run
+```
+
+### Docker：切区域/节点后不生效
+
+环境变量通过 `docker compose up -d` 传入时，需要注意：
+- 命令行 `SING_RUN_REGION=hk docker compose up -d sing-run` 会覆盖 `.env` 中的值
+- 修改 `.env` 后需要 `docker compose up -d sing-run` 重建容器才能生效
+- `docker compose restart` **不会**重新读取环境变量，必须用 `up -d`
 
 ## 许可证
 

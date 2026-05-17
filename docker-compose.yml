@@ -1,92 +1,84 @@
 # sing-run Docker Compose 示例
 #
+# ═══════════════════════════════════════════════════════════════════════
+# 默认模式 — 本地代理（从国内出国）
+# ═══════════════════════════════════════════════════════════════════════
+#
 # 使用方法:
 #   1. 复制 sources.sh.example 为 sources.sh 并配置订阅源
-#   2. 更新节点:  docker compose run --rm jp update-nodes
-#   3. 启动区域:  docker compose up -d jp
-#   4. 查看日志:  docker compose logs -f jp
-#   5. 停止:      docker compose down
+#   2. 构建镜像:  docker compose build
+#   3. 更新节点:  docker compose run --rm sing-run update-nodes
+#   4. 启动区域:  docker compose up -d
+#   5. 查看日志:  docker compose logs -f sing-run
+#   6. 停止:      docker compose down
 #
-# 启动多个区域:
-#   docker compose up -d jp usa tw
-#
-# 管理命令 (通过任意服务运行):
-#   docker compose run --rm jp sources        # 查看可用源
-#   docker compose run --rm jp regions        # 查看可用区域
-#   docker compose run --rm jp update-nodes   # 更新所有节点
-#   docker compose run --rm jp update-rules   # 更新路由规则集
+# 管理命令:
+#   docker compose run --rm sing-run sources        # 查看可用源
+#   docker compose run --rm sing-run regions        # 查看可用区域
+#   docker compose run --rm sing-run update-nodes   # 更新所有节点
+#   docker compose run --rm sing-run update-rules   # 更新路由规则集
 
 services:
-  jp:
+  sing-run:
     build:
       context: .
       args:
         SING_BOX_VERSION: "1.11.0"
     command: ["jp"]
+    environment:
+      # 环境变量优先于 command 参数，修改后 docker compose up -d 即可生效
+      - SING_RUN_REGION=${SING_RUN_REGION:-}     # 区域（覆盖 command 中的区域）
+      - SING_RUN_NODE=${SING_RUN_NODE:-}         # 节点：数字 / next / prev
+      - SING_RUN_SOURCE=${SING_RUN_SOURCE:-}     # 订阅源短名
     volumes:
       - ./sources.sh:/app/sources.sh:ro
       - sing-run-data:/data
     ports:
-      - "7810:7810"   # SOCKS
-      - "7811:7811"   # HTTP
+      # 默认模式端口跟区域绑定，改区域时需同步修改端口映射
+      # 各区域端口见 README「可用区域」表
+      - "7810:7810"   # SOCKS (jp)
+      - "7811:7811"   # HTTP  (jp)
     restart: unless-stopped
 
-  # 取消注释以启用其他区域
-  # usa:
-  #   build:
-  #     context: .
-  #     args:
-  #       SING_BOX_VERSION: "1.11.0"
-  #   command: ["usa"]
-  #   volumes:
-  #     - ./sources.sh:/app/sources.sh:ro
-  #     - sing-run-data:/data
-  #   ports:
-  #     - "7800:7800"
-  #     - "7801:7801"
-  #   restart: unless-stopped
+# ═══════════════════════════════════════════════════════════════════════
+# Reverse 模式 — 海外网关（从海外回国）
+# ═══════════════════════════════════════════════════════════════════════
+#
+# 适用于海外服务器需要访问中国大陆 API（AKShare、CLS 等）。
+# 路由逻辑：中国域名/IP → 代理回国，其他流量 → 直连。
+# 固定端口：SOCKS 7890 / HTTP 7891，不随区域变化。
+#
+# 取消注释下面的 sing-run-gateway 服务，注释上面的 sing-run 服务。
+#
+# 切换区域/节点/源 — 只需重启 sing-run-gateway，其他容器无感：
+#   SING_RUN_REGION=hk docker compose up -d sing-run-gateway
+#   SING_RUN_NODE=next docker compose up -d sing-run-gateway
 
-  # tw:
+  # sing-run-gateway:
   #   build:
   #     context: .
   #     args:
   #       SING_BOX_VERSION: "1.11.0"
-  #   command: ["tw"]
+  #   command: ["--reverse"]
+  #   environment:
+  #     - SING_RUN_REGION=${SING_RUN_REGION:-tw}
+  #     - SING_RUN_NODE=${SING_RUN_NODE:-}
+  #     - SING_RUN_SOURCE=${SING_RUN_SOURCE:-}
   #   volumes:
   #     - ./sources.sh:/app/sources.sh:ro
   #     - sing-run-data:/data
-  #   ports:
-  #     - "7830:7830"
-  #     - "7831:7831"
+  #   expose:
+  #     - "7890"
+  #     - "7891"
   #   restart: unless-stopped
-
-  # hk:
-  #   build:
-  #     context: .
-  #     args:
-  #       SING_BOX_VERSION: "1.11.0"
-  #   command: ["hk"]
-  #   volumes:
-  #     - ./sources.sh:/app/sources.sh:ro
-  #     - sing-run-data:/data
-  #   ports:
-  #     - "7820:7820"
-  #     - "7821:7821"
-  #   restart: unless-stopped
-
-  # sg:
-  #   build:
-  #     context: .
-  #     args:
-  #       SING_BOX_VERSION: "1.11.0"
-  #   command: ["sg"]
-  #   volumes:
-  #     - ./sources.sh:/app/sources.sh:ro
-  #     - sing-run-data:/data
-  #   ports:
-  #     - "7840:7840"
-  #     - "7841:7841"
-  #   restart: unless-stopped
+  #
+  #   # 其他容器使用网关的方式：
+  #   #   environment:
+  #   #     - HTTP_PROXY=http://sing-run-gateway:7891
+  #   #     - HTTPS_PROXY=http://sing-run-gateway:7891
+  #   #     - NO_PROXY=localhost,127.0.0.1,<其他容器名>
+  #   #   depends_on:
+  #   #     - sing-run-gateway
 
 volumes:
   sing-run-data:
