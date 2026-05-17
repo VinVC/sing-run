@@ -114,18 +114,18 @@
             },
             {
                 "rule_set": "google",
-                "outbound": "proxy"
+                "outbound": "direct"
             },
             {
                 "rule_set": "cn",
-                "outbound": "direct"
+                "outbound": "proxy"
             },
             {
                 "rule_set": "geoip-cn",
-                "outbound": "direct"
+                "outbound": "proxy"
             }
         ],
-        "final": "proxy",
+        "final": "direct",
         "auto_detect_interface": true,
         "default_domain_resolver": "direct-dns"
     },
