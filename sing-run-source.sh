@@ -354,11 +354,16 @@ _sing_source_update() {
     esac
   done
   
-  # If no input type specified, use configured URL
+  # If no input type specified, use configured URL or string
   if [[ -z "$input_type" ]]; then
     local configured_url="${SING_RUN_SOURCE_UPDATE_URL[$source]}"
     if [[ -n "$configured_url" ]]; then
-      input_type="url"
+      # Distinguish actual URLs from raw base64 strings
+      if [[ "$configured_url" == http://* || "$configured_url" == https://* ]]; then
+        input_type="url"
+      else
+        input_type="string"
+      fi
       input_value="$configured_url"
     elif [[ -f "$SING_RUN_SCRIPT_DIR/data/$source" ]]; then
       input_type="file"
