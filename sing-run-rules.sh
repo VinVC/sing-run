@@ -366,7 +366,7 @@ _sing_rules_generate_route_rules() {
 # Generate DNS rules for direct domains
 # Direct domains use local DNS (router) for resolution so that
 # internal/private domains that are only resolvable by the router work correctly
-# Returns: JSON rules for sing-box DNS config (direct domains → internal-dns)
+# Returns: JSON rules for sing-box DNS config (direct domains → internal-dns / system DNS)
 _sing_rules_generate_dns_rules() {
   _sing_rules_ensure_dirs
   
@@ -397,7 +397,7 @@ _sing_rules_generate_dns_rules() {
     domain_array+="        \"$domain\""
   done
   
-  # Generate DNS rule: direct domains → internal-dns (router/local DNS)
+  # Generate DNS rule: direct domains → internal-dns (system DNS with fallback)
   local rules_json=""
   rules_json+="      {\n"
   rules_json+="        \"domain_suffix\": [\n$domain_array\n        ],\n"

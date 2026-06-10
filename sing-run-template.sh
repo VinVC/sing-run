@@ -242,14 +242,6 @@ _sing_template_generate_config() {
     return 1
   fi
   
-  # Get current DNS (primary + extras)
-  local current_dns=$(_sing_system_get_dns)
-  local -a all_dns=($(_sing_system_get_all_dns))
-  local -a extra_dns=()
-  for _dns in "${all_dns[@]}"; do
-    [[ "$_dns" != "$current_dns" ]] && extra_dns+=("$_dns")
-  done
-  
   # Generate outbound configuration
   local outbound_config=$(_sing_template_generate_outbound "$node_line")
   
@@ -271,8 +263,6 @@ _sing_template_generate_config() {
     config="${config//\{\{IP_CIDR\}\}/$ip_cidr}"
     config="${config//\"\{\{AUTO_ROUTE\}\}\"/$auto_route}"
   fi
-  # Internal DNS (used by both TUN and proxy templates for internal domain resolution)
-  config="${config//\{\{INTERNAL_DNS\}\}/$current_dns}"
   # Ports: Replace quoted placeholder with integer (remove quotes)
   config="${config//\"\{\{SOCKS_PORT\}\}\"/$socks_port}"
   config="${config//\"\{\{HTTP_PORT\}\}\"/$http_port}"
@@ -303,23 +293,7 @@ _sing_template_generate_config() {
     echo "[]" > "$tmp_dns_custom"
   fi
   
-  # Generate extra internal DNS servers JSON (for secondary system DNS servers)
-  local tmp_extra_dns=$(mktemp)
-  if [[ ${#extra_dns[@]} -gt 0 ]]; then
-    local _idx=2
-    local _entries=""
-    for _dns in "${extra_dns[@]}"; do
-      [[ -n "$_entries" ]] && _entries+=","
-      _entries+='{"type":"udp","tag":"internal-dns-'"$_idx"'","server":"'"$_dns"'","server_port":53}'
-      ((_idx++))
-    done
-    echo "[${_entries}]" > "$tmp_extra_dns"
-  else
-    echo "[]" > "$tmp_extra_dns"
-  fi
-
-  # Use jq to merge outbound, custom route rules, custom DNS rules, and extra DNS servers
-  # - Extra internal DNS servers are appended to dns.servers
+  # Use jq to merge outbound, custom route rules, and custom DNS rules
   # - Custom DNS rules replace the {{CUSTOM_DNS_RULES}} placeholder in-place
   # - Custom route rules replace the {{CUSTOM_ROUTE_RULES}} placeholder in-place
   #   (preserving template order so custom rules sit before geoip-cn)
@@ -327,14 +301,12 @@ _sing_template_generate_config() {
     --slurpfile outbound "$tmp_outbound" \
     --slurpfile custom_route "$tmp_route_custom" \
     --slurpfile custom_dns "$tmp_dns_custom" \
-    --slurpfile extra_dns "$tmp_extra_dns" \
     '.outbounds[0] = $outbound[0] | 
-     .dns.servers = .dns.servers + $extra_dns[0] |
      .dns.rules = [.dns.rules[] | if type == "string" then $custom_dns[0][] else . end] |
      .route.rules = [.route.rules[] | if type == "string" then $custom_route[0][] else . end]' \
     "$tmp_template" 2>&1)
   
-  rm -f "$tmp_template" "$tmp_outbound" "$tmp_route_custom" "$tmp_dns_custom" "$tmp_extra_dns"
+  rm -f "$tmp_template" "$tmp_outbound" "$tmp_route_custom" "$tmp_dns_custom"
   
   if [[ $? -eq 0 ]]; then
     echo "$result"

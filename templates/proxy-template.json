@@ -18,14 +18,8 @@
                 "server": "223.5.5.5"
             },
             {
-                "type": "udp",
-                "tag": "internal-dns",
-                "server": "{{INTERNAL_DNS}}",
-                "server_port": 53
-            },
-            {
                 "type": "local",
-                "tag": "local-dns"
+                "tag": "internal-dns"
             },
             {
                 "type": "fakeip",
