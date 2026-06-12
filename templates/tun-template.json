@@ -74,7 +74,9 @@
             "mtu": 1400,
             "auto_route": "{{AUTO_ROUTE}}",
             "strict_route": true,
-            "stack": "mixed"
+            "stack": "mixed",
+            "sniff": true,
+            "sniff_override_destination": true
         },
         {
             "type": "socks",
@@ -143,11 +145,17 @@
                 "protocol": "dns",
                 "action": "hijack-dns"
             },
+            "{{CUSTOM_ROUTE_RULES}}",
+            {
+                "ip_cidr": [
+                    "198.18.0.0/15"
+                ],
+                "outbound": "proxy"
+            },
             {
                 "ip_is_private": true,
                 "outbound": "direct"
             },
-            "{{CUSTOM_ROUTE_RULES}}",
             {
                 "rule_set": "ads",
                 "action": "reject"

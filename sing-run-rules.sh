@@ -236,6 +236,15 @@ _sing_rules_list() {
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 
+# Check if a domain is listed for direct (company/intranet) access
+_sing_rules_is_direct_domain() {
+  local input="$1"
+  local domain=$(_sing_rules_extract_domain "$input")
+
+  _sing_rules_ensure_dirs
+  [[ -f "$SING_RUN_DIRECT_RULES" ]] && grep -Fxq "$domain" "$SING_RUN_DIRECT_RULES" 2>/dev/null
+}
+
 # =============================================================================
 # Route Rules Generation
 # =============================================================================

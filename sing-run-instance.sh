@@ -525,10 +525,6 @@ _sing_instance_start() {
     # Persist interface allocation for TUN mode
     if [[ "$auto_route" == "true" && -n "$interface" ]]; then
       _sing_instance_save_interface "$region" "$interface"
-      # Flush stale OS DNS cache (e.g. GFW-polluted chatgpt.com entries).
-      # Do not bind 127.0.0.1:53 — macOS mDNSResponder often owns that port.
-      _sing_system_flush_dns_cache
-      echo "✓ 已刷新系统 DNS 缓存 (TUN + fakeip 接管代理域名解析)"
     fi
     
     return 0
@@ -587,10 +583,6 @@ _sing_instance_stop() {
     # Clean up interface reservation so it can be reused
     local interface_file="$SING_RUN_INSTANCES_DIR/$region/state/interface.txt"
     [[ -f "$interface_file" ]] && rm -f "$interface_file"
-    if [[ "$use_sudo" == "true" ]]; then
-      _sing_system_restore_dns
-      _sing_system_flush_dns_cache
-    fi
     # Wait for kernel to fully release sockets (especially root-owned)
     sleep 2
     echo "✓ $region 实例已停止"
