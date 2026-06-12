@@ -56,6 +56,8 @@ assert fakeip_proxy_idx < private_direct_idx, "fakeip proxy rule must precede pr
 dns_rules = config.get("dns", {}).get("rules", [])
 assert any(rule.get("rule_set") == "openai" and rule.get("server") == "proxy-fakeip" for rule in dns_rules), "OpenAI DNS must use fakeip"
 assert any(rule.get("rule_set") == "openai" and rule.get("outbound") == "proxy" for rule in routes), "OpenAI routes must use proxy"
+assert any(rule.get("rule_set") == "claude" and rule.get("server") == "proxy-fakeip" for rule in dns_rules), "Claude DNS must use fakeip"
+assert any(rule.get("rule_set") == "claude" and rule.get("outbound") == "proxy" for rule in routes), "Claude routes must use proxy"
 
 custom_proxy_route = next(
     (rule for rule in routes if rule.get("outbound") == "proxy" and "openai.com" in rule.get("domain", [])),

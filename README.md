@@ -184,7 +184,7 @@ SING_RUN_REGION=jp SING_RUN_NODE=0 docker compose up -d sing-run
 docker compose run --rm sing-run sources        # 查看可用源
 docker compose run --rm sing-run regions        # 查看可用区域
 docker compose run --rm sing-run update-nodes   # 更新所有节点
-docker compose run --rm sing-run update-rules   # 更新路由规则集
+docker compose run --rm sing-run update-ruleset # 更新路由规则集
 ```
 
 查看当前区域的节点列表：
@@ -321,7 +321,8 @@ sing-run --rules                      # 显示所有自定义规则
 sing-run --add-proxy example.com      # 添加到代理列表
 sing-run --add-direct corp.com        # 添加到直连列表（本地 DNS + 直连）
 sing-run --del-rule example.com       # 删除规则
-sing-run update-rules                 # 更新内置路由规则集
+sing-run update-ruleset               # 更新内置路由规则集
+sing-run check-ruleset                # 查看规则集信息和更新时间
 ```
 
 > 修改规则后会提示是否重启运行中的实例以生效。
@@ -474,7 +475,7 @@ curl -x http://127.0.0.1:7811 https://www.google.com
 sing-run 包含完整的路由规则集（首次启动时自动下载）：
 
 - **广告拦截** - 自动拦截广告域名
-- **Google 服务** - Google 相关域名走代理
+- **Google / Claude / OpenAI 服务** - 相关域名走代理
 - **中国域名/IP** - 国内域名和 IP 直连
 - **内网域名** - `.lan`, `.local` 等内网域名直连
 
@@ -710,7 +711,7 @@ tun-template.json / proxy-template.json
     ├─ 替换占位符: 端口、节点、接口、IP
     ├─ 注入自定义 DNS 规则 (直连域名 → 本地 DNS)
     ├─ 注入自定义路由规则 (代理/直连域名)
-    ├─ 注入内置规则集 (广告、Google、中国域名)
+    ├─ 注入内置规则集 (广告、Google、Claude、OpenAI、中国域名)
     ├─ 插件 post_config 钩子 (注入额外 outbound/路由/DNS 规则)
     └─→ config.json
 ```
@@ -828,7 +829,7 @@ tail -f ~/.sing-run/instances/jp/logs/sing-box.log
 # 等待所有 "download rule-set" 完成
 ```
 
-也可预先下载：`sing-run update-rules`
+也可预先下载：`sing-run update-ruleset`
 
 ### 实例无法启动
 

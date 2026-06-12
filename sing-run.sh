@@ -136,13 +136,14 @@ _sing_run_show_help() {
   sing-run update-nodes <源>        # 更新指定源的节点列表
   sing-run update-nodes <源> --url <URL>  # 从指定 URL 更新
   sing-run update-nodes <源> --file <文件> # 从本地文件更新
-  sing-run update-rules             # 更新路由规则集 (首次自动下载)
 
 域名规则管理:
   sing-run --rules                  # 显示自定义域名规则
   sing-run --add-proxy <domain>     # 添加域名到代理列表
   sing-run --add-direct <domain>    # 添加域名到直连列表（本地 DNS + 直连）
   sing-run --del-rule <domain>      # 删除域名规则
+  sing-run update-ruleset           # 更新路由规则集 (首次自动下载)
+  sing-run check-ruleset [规则集]    # 查看规则集信息和更新时间
 
 插件:
   sing-run plugin                   # 查看已加载的插件
@@ -527,9 +528,13 @@ sing-run() {
       # Disable TUN transparent proxy on whichever instance has it
       _sing_run_disable_auto_route
       ;;
-    update-rules)
+    update-ruleset)
       # Force update rule-set files
       _sing_ruleset_update
+      ;;
+    check-ruleset)
+      # Show rule-set files and update metadata
+      _sing_ruleset_check "$2"
       ;;
     update-nodes)
       # Update source node subscription

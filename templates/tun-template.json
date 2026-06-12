@@ -52,6 +52,10 @@
                 "server": "proxy-fakeip"
             },
             {
+                "rule_set": "claude",
+                "server": "proxy-fakeip"
+            },
+            {
                 "rule_set": "google",
                 "server": "proxy-fakeip"
             },
@@ -119,6 +123,12 @@
                 "path": "{{RULESET_DIR}}/geosite-openai.srs"
             },
             {
+                "tag": "claude",
+                "type": "local",
+                "format": "binary",
+                "path": "{{RULESET_DIR}}/geosite-anthropic.srs"
+            },
+            {
                 "tag": "cn",
                 "type": "local",
                 "format": "binary",
@@ -169,6 +179,10 @@
             },
             {
                 "rule_set": "openai",
+                "outbound": "proxy"
+            },
+            {
+                "rule_set": "claude",
                 "outbound": "proxy"
             },
             {

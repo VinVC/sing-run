@@ -121,8 +121,19 @@ typeset -A SING_RUN_RULESET_URLS
 SING_RUN_RULESET_URLS[geosite-category-ads-all.srs]="https://fastly.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-category-ads-all.srs"
 SING_RUN_RULESET_URLS[geosite-google.srs]="https://fastly.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-google.srs"
 SING_RUN_RULESET_URLS[geosite-openai.srs]="https://fastly.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-openai.srs"
+SING_RUN_RULESET_URLS[geosite-anthropic.srs]="https://fastly.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-anthropic.srs"
 SING_RUN_RULESET_URLS[geosite-cn.srs]="https://fastly.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs"
 SING_RUN_RULESET_URLS[geoip-cn.srs]="https://fastly.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-cn.srs"
+
+_sing_ruleset_all_files() {
+  printf "%s\n" \
+    "geosite-category-ads-all.srs" \
+    "geosite-google.srs" \
+    "geosite-openai.srs" \
+    "geosite-anthropic.srs" \
+    "geosite-cn.srs" \
+    "geoip-cn.srs"
+}
 
 # Download a single rule-set file
 _sing_ruleset_download_one() {
@@ -161,6 +172,7 @@ _sing_ruleset_files_for_template() {
         "geosite-category-ads-all.srs" \
         "geosite-google.srs" \
         "geosite-openai.srs" \
+        "geosite-anthropic.srs" \
         "geosite-cn.srs" \
         "geoip-cn.srs"
       ;;
@@ -174,7 +186,7 @@ _sing_ruleset_ensure() {
 
   local ruleset_files=("$@")
   if [[ ${#ruleset_files[@]} -eq 0 ]]; then
-    ruleset_files=("${(k)SING_RUN_RULESET_URLS[@]}")
+    ruleset_files=("${(@f)$(_sing_ruleset_all_files)}")
   fi
   
   local missing=()
@@ -215,7 +227,8 @@ _sing_ruleset_update() {
   
   echo "📥 更新路由规则集..."
   local failed=0
-  for filename in "${(k)SING_RUN_RULESET_URLS[@]}"; do
+  local filename
+  for filename in "${(@f)$(_sing_ruleset_all_files)}"; do
     printf "  %-45s " "$filename"
     if _sing_ruleset_download_one "$filename"; then
       echo "✓"
@@ -232,6 +245,143 @@ _sing_ruleset_update() {
   
   echo "✓ 所有规则集已更新"
   return 0
+}
+
+_sing_ruleset_file_mtime() {
+  local file="$1"
+  if stat -f "%Sm" -t "%Y-%m-%d %H:%M:%S %z" "$file" >/dev/null 2>&1; then
+    stat -f "%Sm" -t "%Y-%m-%d %H:%M:%S %z" "$file"
+  else
+    stat -c "%y" "$file" 2>/dev/null
+  fi
+}
+
+_sing_ruleset_file_size() {
+  local file="$1"
+  if stat -f "%z" "$file" >/dev/null 2>&1; then
+    stat -f "%z" "$file"
+  else
+    stat -c "%s" "$file" 2>/dev/null
+  fi
+}
+
+_sing_ruleset_remote_mtime() {
+  local url="$1"
+  local headers line value date_value
+  headers=$(curl -fsIL --connect-timeout 5 --max-time 10 "$url" 2>/dev/null) || return 1
+
+  while IFS= read -r line; do
+    line="${line%$'\r'}"
+    if [[ "${line:l}" == last-modified:* ]]; then
+      value="${line#*:}"
+      value="${value##[[:space:]]}"
+    elif [[ "${line:l}" == date:* ]]; then
+      date_value="${line#*:}"
+      date_value="${date_value##[[:space:]]}"
+    fi
+  done <<< "$headers"
+
+  if [[ -n "$value" ]]; then
+    echo "$value"
+    return 0
+  fi
+
+  if _sing_ruleset_github_mtime "$url"; then
+    return 0
+  fi
+
+  if [[ -n "$date_value" ]]; then
+    echo "未提供 Last-Modified，远端响应时间: $date_value"
+    return 0
+  fi
+
+  return 1
+}
+
+_sing_ruleset_github_mtime() {
+  local url="$1"
+  local repo=""
+  local filename="${url:t}"
+
+  case "$url" in
+    *SagerNet/sing-geosite*)
+      repo="SagerNet/sing-geosite"
+      ;;
+    *SagerNet/sing-geoip*)
+      repo="SagerNet/sing-geoip"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  local api="https://api.github.com/repos/${repo}/commits?sha=rule-set&path=${filename}&per_page=1"
+  local body line value
+  body=$(curl -fsL --connect-timeout 5 --max-time 10 "$api" 2>/dev/null) || return 1
+
+  while IFS= read -r line; do
+    if [[ "$line" == *'"date":'* ]]; then
+      value="${line#*:}"
+      value="${value//\"/}"
+      value="${value//,/}"
+      value="${value##[[:space:]]}"
+      [[ -n "$value" ]] && echo "$value" && return 0
+    fi
+  done <<< "$body"
+
+  return 1
+}
+
+_sing_ruleset_check() {
+  mkdir -p "$SING_RUN_RULESET_DIR"
+
+  local query="$1"
+  local files=()
+  local filename
+  if [[ -n "$query" ]]; then
+    if [[ "$query" == "claude" || "$query" == "anthropic" ]]; then
+      files=("geosite-anthropic.srs")
+    elif [[ -n "${SING_RUN_RULESET_URLS[$query]}" ]]; then
+      files=("$query")
+    elif [[ -n "${SING_RUN_RULESET_URLS[geosite-${query}.srs]}" ]]; then
+      files=("geosite-${query}.srs")
+    elif [[ -n "${SING_RUN_RULESET_URLS[geoip-${query}.srs]}" ]]; then
+      files=("geoip-${query}.srs")
+    else
+      echo "错误: 未知的规则集 '$query'" >&2
+      return 1
+    fi
+  else
+    files=("${(@f)$(_sing_ruleset_all_files)}")
+  fi
+
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "                       Ruleset 信息"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "目录: $SING_RUN_RULESET_DIR"
+  echo ""
+
+  for filename in "${files[@]}"; do
+    local url="${SING_RUN_RULESET_URLS[$filename]}"
+    local file="$SING_RUN_RULESET_DIR/$filename"
+    local size="未下载"
+    local local_mtime="未下载"
+    local remote_mtime="无法获取"
+
+    if [[ -f "$file" ]]; then
+      size="$(_sing_ruleset_file_size "$file") bytes"
+      local_mtime="$(_sing_ruleset_file_mtime "$file")"
+    fi
+    remote_mtime="$(_sing_ruleset_remote_mtime "$url" || echo "无法获取")"
+
+    echo "规则集: $filename"
+    echo "  本地文件: $file"
+    echo "  大小: $size"
+    echo "  本地更新时间: $local_mtime"
+    echo "  远端更新时间: $remote_mtime"
+    echo "  URL: $url"
+    echo ""
+  done
 }
 
 # =============================================================================
@@ -268,7 +418,7 @@ _sing_template_generate_config() {
   # Ensure rule-set files are available locally (output to stderr to avoid contaminating JSON)
   _sing_ruleset_ensure "${required_rulesets[@]}" >&2
   if [[ $? -ne 0 ]]; then
-    echo "错误: 必需的规则集不可用，无法生成配置。请联网后重试或运行 sing-run update-rules。" >&2
+    echo "错误: 必需的规则集不可用，无法生成配置。请联网后重试或运行 sing-run update-ruleset。" >&2
     return 1
   fi
   

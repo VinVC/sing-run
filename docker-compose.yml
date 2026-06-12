@@ -16,7 +16,7 @@
 #   docker compose run --rm sing-run sources        # 查看可用源
 #   docker compose run --rm sing-run regions        # 查看可用区域
 #   docker compose run --rm sing-run update-nodes   # 更新所有节点
-#   docker compose run --rm sing-run update-rules   # 更新路由规则集
+#   docker compose run --rm sing-run update-ruleset # 更新路由规则集
 
 services:
   sing-run:
