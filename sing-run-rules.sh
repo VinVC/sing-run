@@ -48,18 +48,73 @@ _sing_rules_extract_domain() {
   echo "$domain"
 }
 
+# Normalize a domain rule so equivalent inputs produce the same stored rule.
+_sing_rules_normalize_domain() {
+  local domain=$(_sing_rules_extract_domain "$1")
+
+  domain="${domain:l}"
+
+  # Users often enter wildcard/suffix forms, but sing-box generation below
+  # emits exact + subdomain matchers explicitly.
+  domain="${domain#\*.}"
+  while [[ "$domain" == .* ]]; do
+    domain="${domain#.}"
+  done
+  while [[ "$domain" == *. ]]; do
+    domain="${domain%.}"
+  done
+
+  echo "$domain"
+}
+
+_sing_rules_normalize_rule_entry() {
+  local input="$1"
+
+  if _sing_rules_is_ip "$input"; then
+    echo "${input:l}"
+    return
+  fi
+
+  _sing_rules_normalize_domain "$input"
+}
+
 # Check if a string is an IP address (IPv4 or IPv6)
 _sing_rules_is_ip() {
   local input="$1"
+  local address="${input%%/*}"
+
   # IPv4
-  if [[ "$input" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  if [[ "$address" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     return 0
   fi
   # IPv6 (contains colon)
-  if [[ "$input" =~ ^[0-9a-fA-F:]+$ ]] && [[ "$input" == *:* ]]; then
+  if [[ "$address" =~ ^[0-9a-fA-F:]+$ ]] && [[ "$address" == *:* ]]; then
     return 0
   fi
   return 1
+}
+
+# Build sing-box domain match fields for exact domains and their subdomains.
+_sing_rules_domain_match_fields_json() {
+  local domains=("$@")
+  local domain_array=""
+  local suffix_array=""
+  local domain=""
+
+  for domain in "${domains[@]}"; do
+    domain=$(_sing_rules_normalize_domain "$domain")
+    [[ -z "$domain" ]] && continue
+
+    [[ -n "$domain_array" ]] && domain_array+=",\n"
+    domain_array+="        \"$domain\""
+
+    [[ -n "$suffix_array" ]] && suffix_array+=",\n"
+    suffix_array+="        \".$domain\""
+  done
+
+  [[ -z "$domain_array" ]] && return
+
+  echo -e "        \"domain\": [\n$domain_array\n        ],\n        \"domain_suffix\": [\n$suffix_array\n        ]"
 }
 
 # =============================================================================
@@ -80,8 +135,8 @@ _sing_rules_add_proxy() {
   
   _sing_rules_ensure_dirs
   
-  # Extract domain if URL provided
-  local domain=$(_sing_rules_extract_domain "$input")
+  # Extract and normalize domain/IP if URL provided
+  local domain=$(_sing_rules_normalize_rule_entry "$input")
   
   # Check if already exists
   if grep -Fxq "$domain" "$SING_RUN_PROXY_RULES" 2>/dev/null; then
@@ -120,8 +175,8 @@ _sing_rules_add_direct() {
   
   _sing_rules_ensure_dirs
   
-  # Extract domain if URL provided
-  local domain=$(_sing_rules_extract_domain "$input")
+  # Extract and normalize domain/IP if URL provided
+  local domain=$(_sing_rules_normalize_rule_entry "$input")
   
   # Check if already exists
   if grep -Fxq "$domain" "$SING_RUN_DIRECT_RULES" 2>/dev/null; then
@@ -140,7 +195,7 @@ _sing_rules_add_direct() {
 
 # Delete domain rule
 _sing_rules_delete() {
-  local domain="$1"
+  local domain=$(_sing_rules_normalize_rule_entry "$1")
   
   if [[ -z "$domain" ]]; then
     echo "错误: 请指定要删除的域名"
@@ -239,7 +294,7 @@ _sing_rules_list() {
 # Check if a domain is listed for direct (company/intranet) access
 _sing_rules_is_direct_domain() {
   local input="$1"
-  local domain=$(_sing_rules_extract_domain "$input")
+  local domain=$(_sing_rules_normalize_domain "$input")
 
   _sing_rules_ensure_dirs
   [[ -f "$SING_RUN_DIRECT_RULES" ]] && grep -Fxq "$domain" "$SING_RUN_DIRECT_RULES" 2>/dev/null
@@ -270,19 +325,17 @@ _sing_rules_generate_route_rules() {
       fi
     done < "$SING_RUN_PROXY_RULES"
     
-    # Domain rule: use "domain_suffix" to match domain + all subdomains
+    # Domain rule: match both the root domain and all subdomains.
     if [[ ${#proxy_domains[@]} -gt 0 ]]; then
-      local domain_array=""
-      for domain in "${proxy_domains[@]}"; do
-        [[ -n "$domain_array" ]] && domain_array+=",\n"
-        domain_array+="        \"$domain\""
-      done
-      [[ $has_rules -eq 1 ]] && rules_json+=",\n"
-      rules_json+="      {\n"
-      rules_json+="        \"domain_suffix\": [\n$domain_array\n        ],\n"
-      rules_json+="        \"outbound\": \"proxy\"\n"
-      rules_json+="      }"
-      has_rules=1
+      local domain_match=$(_sing_rules_domain_match_fields_json "${proxy_domains[@]}")
+      if [[ -n "$domain_match" ]]; then
+        [[ $has_rules -eq 1 ]] && rules_json+=",\n"
+        rules_json+="      {\n"
+        rules_json+="$domain_match,\n"
+        rules_json+="        \"outbound\": \"proxy\"\n"
+        rules_json+="      }"
+        has_rules=1
+      fi
     fi
     
     # IP rule: use "ip_cidr" field
@@ -323,19 +376,17 @@ _sing_rules_generate_route_rules() {
       fi
     done < "$SING_RUN_DIRECT_RULES"
 
-    # Domain rule: use "domain_suffix" to match domain + all subdomains
+    # Domain rule: match both the root domain and all subdomains.
     if [[ ${#direct_domains[@]} -gt 0 ]]; then
-      local domain_array=""
-      for domain in "${direct_domains[@]}"; do
-        [[ -n "$domain_array" ]] && domain_array+=",\n"
-        domain_array+="        \"$domain\""
-      done
-      [[ $has_rules -eq 1 ]] && rules_json+=",\n"
-      rules_json+="      {\n"
-      rules_json+="        \"domain_suffix\": [\n$domain_array\n        ],\n"
-      rules_json+="        \"outbound\": \"direct\"\n"
-      rules_json+="      }"
-      has_rules=1
+      local domain_match=$(_sing_rules_domain_match_fields_json "${direct_domains[@]}")
+      if [[ -n "$domain_match" ]]; then
+        [[ $has_rules -eq 1 ]] && rules_json+=",\n"
+        rules_json+="      {\n"
+        rules_json+="$domain_match,\n"
+        rules_json+="        \"outbound\": \"direct\"\n"
+        rules_json+="      }"
+        has_rules=1
+      fi
     fi
 
     # IP rule: use "ip_cidr" field
@@ -397,19 +448,13 @@ _sing_rules_generate_dns_rules() {
     return
   fi
   
-  # Build domain_suffix array for JSON
-  local domain_array=""
-  for domain in "${direct_domains[@]}"; do
-    if [[ -n "$domain_array" ]]; then
-      domain_array+=",\n"
-    fi
-    domain_array+="        \"$domain\""
-  done
+  local domain_match=$(_sing_rules_domain_match_fields_json "${direct_domains[@]}")
+  [[ -z "$domain_match" ]] && return
   
   # Generate DNS rule: direct domains → internal-dns (system DNS with fallback)
   local rules_json=""
   rules_json+="      {\n"
-  rules_json+="        \"domain_suffix\": [\n$domain_array\n        ],\n"
+  rules_json+="$domain_match,\n"
   rules_json+="        \"server\": \"internal-dns\"\n"
   rules_json+="      }"
   
@@ -439,15 +484,12 @@ _sing_rules_generate_proxy_dns_rules() {
     return
   fi
 
-  local domain_array=""
-  for domain in "${proxy_domains[@]}"; do
-    [[ -n "$domain_array" ]] && domain_array+=",\n"
-    domain_array+="        \"$domain\""
-  done
+  local domain_match=$(_sing_rules_domain_match_fields_json "${proxy_domains[@]}")
+  [[ -z "$domain_match" ]] && return
 
   local rules_json=""
   rules_json+="      {\n"
-  rules_json+="        \"domain_suffix\": [\n$domain_array\n        ],\n"
+  rules_json+="$domain_match,\n"
   rules_json+="        \"server\": \"proxy-fakeip\"\n"
   rules_json+="      }"
 
