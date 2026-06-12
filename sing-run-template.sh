@@ -98,16 +98,15 @@ _sing_template_generate_route_rules() {
   echo "$custom_rules"
 }
 
-# Generate custom DNS rules JSON
+# Generate custom DNS rules JSON (direct domains only)
 _sing_template_generate_dns_rules() {
-  # Get DNS rules from rules module (internal domains → internal-dns)
   local dns_rules=$(_sing_rules_generate_dns_rules)
-  
+
   if [[ -z "$dns_rules" ]]; then
     echo ""
     return
   fi
-  
+
   echo "$dns_rules"
 }
 
@@ -121,6 +120,7 @@ SING_RUN_RULESET_DIR="$SING_RUN_DIR/rulesets"
 typeset -A SING_RUN_RULESET_URLS
 SING_RUN_RULESET_URLS[geosite-category-ads-all.srs]="https://fastly.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-category-ads-all.srs"
 SING_RUN_RULESET_URLS[geosite-google.srs]="https://fastly.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-google.srs"
+SING_RUN_RULESET_URLS[geosite-openai.srs]="https://fastly.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-openai.srs"
 SING_RUN_RULESET_URLS[geosite-cn.srs]="https://fastly.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs"
 SING_RUN_RULESET_URLS[geoip-cn.srs]="https://fastly.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-cn.srs"
 
@@ -250,6 +250,10 @@ _sing_template_generate_config() {
   
   # Generate DNS rules
   local dns_rules=$(_sing_template_generate_dns_rules)
+  local proxy_dns_rules=""
+  if [[ "$auto_route" == "true" ]]; then
+    proxy_dns_rules=$(_sing_rules_generate_proxy_dns_rules)
+  fi
   
   # Set file paths (align with _sing_instance_get_log_file in sing-run-instance.sh)
   local log_file="${config_dir}/logs/sing-box.log"
@@ -276,6 +280,7 @@ _sing_template_generate_config() {
   local tmp_outbound=$(mktemp)
   local tmp_route_custom=$(mktemp)
   local tmp_dns_custom=$(mktemp)
+  local tmp_proxy_dns_custom=$(mktemp)
   echo "$config" > "$tmp_template"
   echo "$outbound_config" > "$tmp_outbound"
   
@@ -292,21 +297,31 @@ _sing_template_generate_config() {
   else
     echo "[]" > "$tmp_dns_custom"
   fi
+  if [[ -n "$proxy_dns_rules" ]]; then
+    echo "[$proxy_dns_rules]" > "$tmp_proxy_dns_custom"
+  else
+    echo "[]" > "$tmp_proxy_dns_custom"
+  fi
   
   # Use jq to merge outbound, custom route rules, and custom DNS rules
   # - Custom DNS rules replace the {{CUSTOM_DNS_RULES}} placeholder in-place
+  # - Custom proxy DNS rules replace {{CUSTOM_PROXY_DNS_RULES}} (TUN template only)
   # - Custom route rules replace the {{CUSTOM_ROUTE_RULES}} placeholder in-place
   #   (preserving template order so custom rules sit before geoip-cn)
   local result=$(jq \
     --slurpfile outbound "$tmp_outbound" \
     --slurpfile custom_route "$tmp_route_custom" \
     --slurpfile custom_dns "$tmp_dns_custom" \
-    '.outbounds[0] = $outbound[0] | 
-     .dns.rules = [.dns.rules[] | if type == "string" then $custom_dns[0][] else . end] |
+    --slurpfile custom_proxy_dns "$tmp_proxy_dns_custom" \
+    '.outbounds[0] = $outbound[0] |
+     .dns.rules = [.dns.rules[] |
+       if type == "string" and . == "{{CUSTOM_DNS_RULES}}" then $custom_dns[0][]
+       elif type == "string" and . == "{{CUSTOM_PROXY_DNS_RULES}}" then $custom_proxy_dns[0][]
+       else . end] |
      .route.rules = [.route.rules[] | if type == "string" then $custom_route[0][] else . end]' \
     "$tmp_template" 2>&1)
   
-  rm -f "$tmp_template" "$tmp_outbound" "$tmp_route_custom" "$tmp_dns_custom"
+  rm -f "$tmp_template" "$tmp_outbound" "$tmp_route_custom" "$tmp_dns_custom" "$tmp_proxy_dns_custom"
   
   if [[ $? -eq 0 ]]; then
     echo "$result"

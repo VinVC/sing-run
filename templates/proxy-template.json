@@ -34,6 +34,10 @@
                 "action": "reject"
             },
             {
+                "rule_set": "openai",
+                "server": "proxy-dns"
+            },
+            {
                 "rule_set": "google",
                 "server": "proxy-dns"
             },
@@ -81,6 +85,12 @@
                 "path": "{{RULESET_DIR}}/geosite-google.srs"
             },
             {
+                "tag": "openai",
+                "type": "local",
+                "format": "binary",
+                "path": "{{RULESET_DIR}}/geosite-openai.srs"
+            },
+            {
                 "tag": "cn",
                 "type": "local",
                 "format": "binary",
@@ -105,6 +115,10 @@
             {
                 "rule_set": "ads",
                 "action": "reject"
+            },
+            {
+                "rule_set": "openai",
+                "outbound": "proxy"
             },
             {
                 "rule_set": "google",

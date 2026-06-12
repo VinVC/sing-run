@@ -261,7 +261,7 @@ _sing_rules_generate_route_rules() {
       fi
     done < "$SING_RUN_PROXY_RULES"
     
-    # Domain rule: use "domain" field
+    # Domain rule: use "domain_suffix" to match domain + all subdomains
     if [[ ${#proxy_domains[@]} -gt 0 ]]; then
       local domain_array=""
       for domain in "${proxy_domains[@]}"; do
@@ -270,7 +270,7 @@ _sing_rules_generate_route_rules() {
       done
       [[ $has_rules -eq 1 ]] && rules_json+=",\n"
       rules_json+="      {\n"
-      rules_json+="        \"domain\": [\n$domain_array\n        ],\n"
+      rules_json+="        \"domain_suffix\": [\n$domain_array\n        ],\n"
       rules_json+="        \"outbound\": \"proxy\"\n"
       rules_json+="      }"
       has_rules=1
@@ -404,6 +404,44 @@ _sing_rules_generate_dns_rules() {
   rules_json+="        \"server\": \"internal-dns\"\n"
   rules_json+="      }"
   
+  echo -e "$rules_json"
+}
+
+# Generate DNS rules for proxy domains (TUN mode only)
+# Proxy domains use fakeip so apps never connect to polluted system DNS cache entries
+# Returns: JSON rules for sing-box DNS config (proxy domains → proxy-fakeip)
+_sing_rules_generate_proxy_dns_rules() {
+  _sing_rules_ensure_dirs
+
+  if [[ ! -f "$SING_RUN_PROXY_RULES" ]] || [[ ! -s "$SING_RUN_PROXY_RULES" ]]; then
+    echo ""
+    return
+  fi
+
+  local proxy_domains=()
+  while IFS= read -r entry; do
+    [[ -z "$entry" || "$entry" =~ ^# ]] && continue
+    _sing_rules_is_ip "$entry" && continue
+    proxy_domains+=("$entry")
+  done < "$SING_RUN_PROXY_RULES"
+
+  if [[ ${#proxy_domains[@]} -eq 0 ]]; then
+    echo ""
+    return
+  fi
+
+  local domain_array=""
+  for domain in "${proxy_domains[@]}"; do
+    [[ -n "$domain_array" ]] && domain_array+=",\n"
+    domain_array+="        \"$domain\""
+  done
+
+  local rules_json=""
+  rules_json+="      {\n"
+  rules_json+="        \"domain_suffix\": [\n$domain_array\n        ],\n"
+  rules_json+="        \"server\": \"proxy-fakeip\"\n"
+  rules_json+="      }"
+
   echo -e "$rules_json"
 }
 

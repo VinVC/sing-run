@@ -23,8 +23,8 @@
             },
             {
                 "type": "fakeip",
-                "tag": "block-dns",
-                "inet4_range": "240.0.0.0/4"
+                "tag": "proxy-fakeip",
+                "inet4_range": "198.18.0.0/15"
             }
         ],
         "rules": [
@@ -42,13 +42,18 @@
                 "server": "internal-dns"
             },
             "{{CUSTOM_DNS_RULES}}",
+            "{{CUSTOM_PROXY_DNS_RULES}}",
             {
                 "rule_set": "ads",
-                "server": "block-dns"
+                "action": "reject"
+            },
+            {
+                "rule_set": "openai",
+                "server": "proxy-fakeip"
             },
             {
                 "rule_set": "google",
-                "server": "proxy-dns"
+                "server": "proxy-fakeip"
             },
             {
                 "rule_set": "cn",
@@ -106,6 +111,12 @@
                 "path": "{{RULESET_DIR}}/geosite-google.srs"
             },
             {
+                "tag": "openai",
+                "type": "local",
+                "format": "binary",
+                "path": "{{RULESET_DIR}}/geosite-openai.srs"
+            },
+            {
                 "tag": "cn",
                 "type": "local",
                 "format": "binary",
@@ -121,6 +132,12 @@
         "rules": [
             {
                 "action": "sniff"
+            },
+            {
+                "port": [
+                    53
+                ],
+                "action": "hijack-dns"
             },
             {
                 "protocol": "dns",
@@ -141,6 +158,10 @@
                     "223.6.6.6/32"
                 ],
                 "outbound": "direct"
+            },
+            {
+                "rule_set": "openai",
+                "outbound": "proxy"
             },
             {
                 "rule_set": "google",
