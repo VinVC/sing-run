@@ -144,12 +144,41 @@ _sing_ruleset_download_one() {
   fi
 }
 
-# Ensure all rule-set files exist locally (download if missing)
+# Return rule-set files referenced by a config template.
+_sing_ruleset_files_for_template() {
+  local template_name="$1"
+
+  case "$template_name" in
+    reverse-proxy-template)
+      printf "%s\n" \
+        "geosite-category-ads-all.srs" \
+        "geosite-google.srs" \
+        "geosite-cn.srs" \
+        "geoip-cn.srs"
+      ;;
+    *)
+      printf "%s\n" \
+        "geosite-category-ads-all.srs" \
+        "geosite-google.srs" \
+        "geosite-openai.srs" \
+        "geosite-cn.srs" \
+        "geoip-cn.srs"
+      ;;
+  esac
+}
+
+# Ensure requested rule-set files exist locally (download if missing).
+# If no files are provided, ensure every known rule-set.
 _sing_ruleset_ensure() {
   mkdir -p "$SING_RUN_RULESET_DIR"
+
+  local ruleset_files=("$@")
+  if [[ ${#ruleset_files[@]} -eq 0 ]]; then
+    ruleset_files=("${(k)SING_RUN_RULESET_URLS[@]}")
+  fi
   
   local missing=()
-  for filename in "${(k)SING_RUN_RULESET_URLS[@]}"; do
+  for filename in "${ruleset_files[@]}"; do
     if [[ ! -f "$SING_RUN_RULESET_DIR/$filename" ]]; then
       missing+=("$filename")
     fi
@@ -230,10 +259,17 @@ _sing_template_generate_config() {
     template_name="proxy-template"
   fi
   
+  local required_rulesets=()
+  local ruleset_file
+  while IFS= read -r ruleset_file; do
+    [[ -n "$ruleset_file" ]] && required_rulesets+=("$ruleset_file")
+  done < <(_sing_ruleset_files_for_template "$template_name")
+
   # Ensure rule-set files are available locally (output to stderr to avoid contaminating JSON)
-  _sing_ruleset_ensure >&2
+  _sing_ruleset_ensure "${required_rulesets[@]}" >&2
   if [[ $? -ne 0 ]]; then
-    echo "警告: 部分规则集不可用，继续启动..." >&2
+    echo "错误: 必需的规则集不可用，无法生成配置。请联网后重试或运行 sing-run update-rules。" >&2
+    return 1
   fi
   
   # Load template
