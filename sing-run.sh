@@ -67,6 +67,13 @@ else
   echo "错误: 无法加载 sing-run-source.sh 模块" >&2
 fi
 
+# Source node health check module
+if [[ -f "$SING_RUN_SCRIPT_DIR/sing-run-node-check.sh" ]]; then
+  source "$SING_RUN_SCRIPT_DIR/sing-run-node-check.sh"
+else
+  echo "错误: 无法加载 sing-run-node-check.sh 模块" >&2
+fi
+
 # Load plugin framework and discover plugins from SING_PLUGIN_PATH
 if [[ -f "$SING_RUN_SCRIPT_DIR/sing-run-plugin.sh" ]]; then
   source "$SING_RUN_SCRIPT_DIR/sing-run-plugin.sh"
@@ -110,6 +117,7 @@ _sing_run_show_help() {
   sing-run jp --node prev           # 日本切换上一个节点
   sing-run jp --node 5              # 日本切换到节点 5
   sing-run jp --nodes               # 列出日本的所有节点
+  sing-run jp --check-nodes         # 真实代理检测当前源的日本节点
 
 源操作（必须指定区域）:
   sing-run jp --source <源>         # 日本切换指定源
@@ -210,6 +218,11 @@ _sing_run_handle_region() {
   local source_arg=""
   local node_arg=""
   local auto_route_arg=""
+  local check_url="https://www.google.com/generate_204"
+  local check_timeout=8
+  local check_limit=0
+  local check_concurrency=4
+  local check_help=""
   local action="start"
   
   while [[ $# -gt 0 ]]; do
@@ -226,8 +239,32 @@ _sing_run_handle_region() {
         auto_route_arg="true"
         shift
         ;;
-      --nodes)
+      nodes|--nodes)
         action="list_nodes"
+        shift
+        ;;
+      check-nodes|--check-nodes)
+        action="check_nodes"
+        shift
+        ;;
+      --url)
+        check_url="$2"
+        shift 2
+        ;;
+      --timeout)
+        check_timeout="$2"
+        shift 2
+        ;;
+      --limit)
+        check_limit="$2"
+        shift 2
+        ;;
+      --concurrency)
+        check_concurrency="$2"
+        shift 2
+        ;;
+      -h|--help)
+        check_help="true"
         shift
         ;;
       *)
@@ -287,6 +324,13 @@ _sing_run_handle_region() {
       ;;
     list_nodes)
       _sing_run_list_nodes "$region"
+      ;;
+    check_nodes)
+      if [[ "$check_help" == "true" ]]; then
+        _sing_node_check_help
+      else
+        _sing_node_check_run "$region" "$source_arg" "$check_url" "$check_timeout" "$check_limit" "$check_concurrency"
+      fi
       ;;
   esac
 }
@@ -406,7 +450,7 @@ _sing_run_list_nodes() {
   
   local total_nodes=0
   local source name type server port uuid password cipher alterId
-  local node_data idx marker color
+  local node_data idx marker color check_summary
   
   for source in "${SING_RUN_SOURCE_ORDER[@]}"; do
     local source_name=$(_sing_source_get_name "$source")
@@ -437,8 +481,8 @@ _sing_run_list_nodes() {
     echo ""
     
     # Table header
-    printf "    \033[2m%-4s  %-40s  %s\033[0m\n" "#" "名称" "类型"
-    printf "    \033[2m%-4s  %-40s  %s\033[0m\n" "──" "────────────────────────────────────────" "────"
+    printf "    \033[2m%-4s  %-40s  %-8s  %s\033[0m\n" "#" "名称" "类型" "上次检测"
+    printf "    \033[2m%-4s  %-40s  %-8s  %s\033[0m\n" "──" "────────────────────────────────────────" "────" "────────"
     
     # Parse and display each node
     idx=0
@@ -455,8 +499,10 @@ _sing_run_list_nodes() {
       if [[ $is_running -eq 1 ]] && [[ "$source" == "$active_source" ]] && [[ $idx -eq $active_node_idx ]]; then
         marker="\033[32m→\033[0m "
       fi
+      check_summary=$(_sing_node_check_summary "$source" "$region" "$idx" "$name")
+      [[ -z "$check_summary" ]] && check_summary="-"
       
-      printf "  ${marker}\033[2m%2d\033[0m  %-40s  \033[2m%s\033[0m\n" $idx "$name" "$type"
+      printf "  ${marker}\033[2m%2d\033[0m  %-40s  \033[2m%-8s\033[0m  %s\n" $idx "$name" "$type" "$check_summary"
       ((idx++))
     done <<< "$node_data"
   done

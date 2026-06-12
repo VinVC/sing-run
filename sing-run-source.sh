@@ -268,7 +268,7 @@ _sing_source_list() {
   
   echo ""
   echo "  切换源: sing-run <区域> --source <源名称>"
-  echo "  查看节点详情: sing-run <区域> nodes"
+  echo "  查看节点详情: sing-run <区域> --nodes"
   echo ""
 }
 
