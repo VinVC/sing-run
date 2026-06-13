@@ -77,6 +77,9 @@
             ],
             "mtu": 1400,
             "auto_route": "{{AUTO_ROUTE}}",
+            "route_exclude_address_set": [
+                "geoip-cn"
+            ],
             "strict_route": true,
             "stack": "mixed",
             "sniff": true,

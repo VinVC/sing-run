@@ -36,10 +36,13 @@ with open(path) as f:
 
 inbounds = config.get("inbounds", [])
 routes = config.get("route", {}).get("rules", [])
+tun_inbound = next((inbound for inbound in inbounds if inbound.get("type") == "tun"), None)
 
 assert not any(inbound.get("tag") == "dns-in" for inbound in inbounds), "TUN config must not depend on /etc/resolver -> dns-in"
 assert not any(rule.get("inbound") == "dns-in" for rule in routes), "dns-in route rule must not be present"
 assert config.get("route", {}).get("auto_detect_interface") is True, "direct/bootstrap traffic must keep auto_detect_interface"
+assert tun_inbound is not None, "TUN inbound must exist"
+assert "geoip-cn" in tun_inbound.get("route_exclude_address_set", []), "CN IPs must bypass TUN routes at system routing layer"
 
 fakeip_proxy_idx = next(
     (i for i, rule in enumerate(routes) if "198.18.0.0/15" in rule.get("ip_cidr", []) and rule.get("outbound") == "proxy"),
