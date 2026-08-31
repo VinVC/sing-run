@@ -44,6 +44,17 @@ _sing_template_generate_outbound() {
   local node_password="${node_parts[6]}"
   local node_cipher="${node_parts[7]}"
   local node_alter_id="${node_parts[8]}"
+
+  # Resolve the proxy endpoint before sing-box starts. If resolution fails,
+  # preserve the hostname and let sing-box's direct-dns fallback handle it.
+  local outbound_server="$node_server"
+  if [[ "$node_server" != *:* ]] && [[ ! "$node_server" =~ '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' ]]; then
+    local resolved_server
+    resolved_server=$(_sing_system_resolve_ipv4 "$node_server") || true
+    if [[ "$resolved_server" =~ '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' ]]; then
+      outbound_server="$resolved_server"
+    fi
+  fi
   
   # Generate JSON based on node type
   # Note: "domain_resolver": "direct-dns" is critical to avoid DNS loopback.
@@ -55,7 +66,7 @@ _sing_template_generate_outbound() {
 {
             "type": "shadowsocks",
             "tag": "proxy",
-            "server": "$node_server",
+            "server": "$outbound_server",
             "server_port": $node_port,
             "method": "${node_cipher:-aes-256-gcm}",
             "password": "$node_password",
@@ -68,7 +79,7 @@ EOF
 {
             "type": "vmess",
             "tag": "proxy",
-            "server": "$node_server",
+            "server": "$outbound_server",
             "server_port": $node_port,
             "uuid": "$node_uuid",
             "security": "auto",
@@ -494,7 +505,8 @@ _sing_template_generate_config() {
   # - Custom proxy DNS rules replace {{CUSTOM_PROXY_DNS_RULES}} (TUN template only)
   # - Custom route rules replace the {{CUSTOM_ROUTE_RULES}} placeholder in-place
   #   (preserving template order so custom rules sit before geoip-cn)
-  local result=$(jq \
+  local result jq_status
+  result=$(jq \
     --slurpfile outbound "$tmp_outbound" \
     --slurpfile custom_route "$tmp_route_custom" \
     --slurpfile custom_dns "$tmp_dns_custom" \
@@ -506,13 +518,22 @@ _sing_template_generate_config() {
        else . end] |
      .route.rules = [.route.rules[] | if type == "string" then $custom_route[0][] else . end]' \
     "$tmp_template" 2>&1)
+  jq_status=$?
   
   rm -f "$tmp_template" "$tmp_outbound" "$tmp_route_custom" "$tmp_dns_custom" "$tmp_proxy_dns_custom"
   
-  if [[ $? -eq 0 ]]; then
-    echo "$result"
-  else
+  if [[ $jq_status -ne 0 ]]; then
     echo "错误: JSON 处理失败: $result" >&2
     return 1
   fi
+
+  if [[ "$auto_route" == "true" ]] && type _sing_system_tun_apply_corp_dns >/dev/null 2>&1; then
+    local applied
+    applied=$(_sing_system_tun_apply_corp_dns "$result")
+    if [[ -n "$applied" ]] && printf '%s' "$applied" | jq . >/dev/null 2>&1; then
+      result="$applied"
+    fi
+  fi
+
+  echo "$result"
 }

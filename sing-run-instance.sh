@@ -165,6 +165,13 @@ _sing_instance_ensure_dirs() {
   mkdir -p "$instance_dir/cache"
 }
 
+# DNS answers can differ between home and corporate networks. Do not carry a
+# persistent sing-box DNS cache into a new TUN session.
+_sing_instance_clear_dns_cache() {
+  local instance_dir="$1"
+  rm -f "$instance_dir/cache/cache.db"
+}
+
 # =============================================================================
 # Instance Node Management
 # =============================================================================
@@ -376,6 +383,10 @@ _sing_instance_start() {
   # Ensure instance directories exist before any file operations
   _sing_instance_ensure_dirs "$region"
 
+  if [[ "$auto_route" == "true" ]]; then
+    _sing_instance_clear_dns_cache "$config_dir"
+  fi
+
   # Generate configuration
   if [[ "$auto_route" == "true" ]]; then
     echo "正在为 $region 生成配置 (节点索引: $node_index, TUN: ✓)..."
@@ -525,6 +536,9 @@ _sing_instance_start() {
     # Persist interface allocation for TUN mode
     if [[ "$auto_route" == "true" && -n "$interface" ]]; then
       _sing_instance_save_interface "$region" "$interface"
+      if type _sing_system_flush_dns_cache >/dev/null 2>&1; then
+        _sing_system_flush_dns_cache
+      fi
     fi
     
     return 0

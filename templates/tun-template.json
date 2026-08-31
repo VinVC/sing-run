@@ -102,7 +102,8 @@
         "{{OUTBOUND_CONFIG}}",
         {
             "type": "direct",
-            "tag": "direct"
+            "tag": "direct",
+            "domain_resolver": "internal-dns"
         }
     ],
     "route": {

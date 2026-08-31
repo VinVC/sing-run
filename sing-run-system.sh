@@ -36,6 +36,120 @@ _sing_system_get_all_dns() {
   done
 }
 
+_sing_system_is_private_ipv4() {
+  local ip="$1"
+  [[ "$ip" == *:* ]] && return 1
+  [[ "$ip" =~ '^10\.([0-9]{1,3}\.){2}[0-9]{1,3}$' ]] && return 0
+  [[ "$ip" =~ '^192\.168\.([0-9]{1,3}\.)[0-9]{1,3}$' ]] && return 0
+  if [[ "$ip" =~ '^172\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$' ]]; then
+    local second="${match[1]}"
+    (( second >= 16 && second <= 31 )) && return 0
+  fi
+  return 1
+}
+
+# Return the private resolver supplied by the current corporate network.
+_sing_system_tun_corp_dns() {
+  if [[ -n "${SING_RUN_TUN_CORP_DNS:-}" ]]; then
+    echo "${SING_RUN_TUN_CORP_DNS%% *}"
+    return 0
+  fi
+
+  local server
+  for server in $(_sing_system_get_all_dns); do
+    if _sing_system_is_private_ipv4 "$server"; then
+      echo "$server"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Avoid local-resolver recursion in TUN mode by making the corporate resolver
+# explicit inside sing-box. The host's configured DNS servers remain untouched.
+_sing_system_tun_apply_corp_dns() {
+  local config="$1"
+  local corp_dns
+  corp_dns=$(_sing_system_tun_corp_dns) || true
+  [[ -z "$corp_dns" ]] && { printf '%s' "$config"; return 0; }
+
+  printf '%s' "$config" | jq --arg server "$corp_dns" '
+    .dns.servers = [
+      .dns.servers[] |
+      if .tag == "internal-dns" then
+        {type: "udp", tag: "internal-dns", server: $server}
+      else . end
+    ]
+  '
+}
+
+# Resolve proxy bootstrap hostnames before sing-box starts. This avoids a
+# circular dependency when the DNS answer contains a CNAME and proxy-dns
+# itself depends on the proxy outbound.
+_sing_system_resolve_ipv4() {
+  local host="$1"
+
+  # TUN may currently have a broken proxy bootstrap path, so query a direct
+  # mainland resolver first. `+short` can contain CNAME lines; keep the A row.
+  if command -v dig >/dev/null 2>&1; then
+    local -a bootstrap_dns
+    bootstrap_dns=(${=${SING_RUN_BOOTSTRAP_DNS:-"223.5.5.5 119.29.29.29"}})
+    local dns answer
+    for dns in "${bootstrap_dns[@]}"; do
+      answer=$(dig "@$dns" +time=2 +tries=1 +short "$host" A 2>/dev/null | \
+        awk '/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ { value=$0 } END { print value }')
+      if [[ -n "$answer" ]]; then
+        echo "$answer"
+        return 0
+      fi
+    done
+  fi
+
+  # Portable fallback for systems without dig.
+  python3 - "$host" <<'PY' 2>/dev/null
+import signal
+import socket
+import sys
+
+
+def timeout(_signum, _frame):
+    raise TimeoutError
+
+
+signal.signal(signal.SIGALRM, timeout)
+signal.alarm(5)
+try:
+    addresses = socket.getaddrinfo(
+        sys.argv[1],
+        None,
+        socket.AF_INET,
+        socket.SOCK_STREAM,
+    )
+except (OSError, TimeoutError):
+    raise SystemExit(1)
+finally:
+    signal.alarm(0)
+
+for address in addresses:
+    ip = address[4][0]
+    if ip:
+        print(ip)
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+# Flush stale resolver answers after TUN routing changes. This intentionally
+# does not alter DNS servers configured by DHCP or the user.
+_sing_system_flush_dns_cache() {
+  [[ "$OSTYPE" == darwin* ]] || return 0
+
+  dscacheutil -flushcache >/dev/null 2>&1 || \
+    sudo -n dscacheutil -flushcache >/dev/null 2>&1 || true
+  sudo -n killall -HUP mDNSResponder >/dev/null 2>&1 || \
+    killall -HUP mDNSResponder >/dev/null 2>&1 || true
+}
+
 # =============================================================================
 # System Information
 # =============================================================================

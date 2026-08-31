@@ -9,6 +9,42 @@ source "$repo_dir/sing-run.sh"
 
 mkdir -p "$tmp_dir/state" "$tmp_dir/logs" "$tmp_dir/cache"
 
+if ! (
+  calls=()
+  dscacheutil() { calls+=("dscacheutil $*"); }
+  killall() { calls+=("killall $*"); }
+  sudo() { calls+=("sudo $*"); }
+  networksetup() { calls+=("networksetup $*"); return 1; }
+  OSTYPE="darwin-test"
+
+  _sing_system_flush_dns_cache
+  joined="${(j:|:)calls}"
+  [[ "$joined" == *"dscacheutil -flushcache"* ]]
+  [[ "$joined" == *"sudo -n killall -HUP mDNSResponder"* ]]
+  [[ "$joined" != *"networksetup"* ]]
+); then
+  echo "macOS DNS cache refresh must not change configured DNS servers" >&2
+  exit 1
+fi
+
+touch "$tmp_dir/cache/cache.db"
+if ! _sing_instance_clear_dns_cache "$tmp_dir" || [[ -e "$tmp_dir/cache/cache.db" ]]; then
+  echo "persistent sing-box DNS cache was not cleared" >&2
+  exit 1
+fi
+
+if ! (
+  dig() {
+    echo "bootstrap.example.test."
+    echo "203.0.113.9"
+  }
+  python3() { return 1; }
+  [[ "$(_sing_system_resolve_ipv4 node.example.test)" == "203.0.113.9" ]]
+); then
+  echo "bootstrap resolver did not follow a direct-DNS CNAME answer" >&2
+  exit 1
+fi
+
 SING_RUN_RULES_DIR="$tmp_dir/rules"
 SING_RUN_PROXY_RULES="$SING_RUN_RULES_DIR/proxy-domains.txt"
 SING_RUN_DIRECT_RULES="$SING_RUN_RULES_DIR/direct-domains.txt"
@@ -20,6 +56,36 @@ _sing_rules_add_direct "120.27.155.114" >/dev/null
 
 node_line="test::::vmess::::shh.itea.la::::21870::::00000000-0000-0000-0000-000000000000::::password::::aes-256-gcm::::0"
 config_file="$tmp_dir/config.json"
+export SING_RUN_TUN_CORP_DNS="172.16.1.100"
+
+if ! (
+  _sing_system_resolve_ipv4() { echo "203.0.113.8"; }
+  outbound=$(_sing_template_generate_outbound "$node_line")
+  [[ "$(printf '%s' "$outbound" | jq -r '.server')" == "203.0.113.8" ]]
+); then
+  echo "proxy node hostname was not replaced by its bootstrap IPv4" >&2
+  exit 1
+fi
+
+if ! (
+  _sing_system_resolve_ipv4() { return 1; }
+  outbound=$(_sing_template_generate_outbound "$node_line")
+  [[ "$(printf '%s' "$outbound" | jq -r '.server')" == "shh.itea.la" ]]
+); then
+  echo "proxy node hostname was not preserved after bootstrap lookup failure" >&2
+  exit 1
+fi
+
+if ! (
+  called=false
+  _sing_system_resolve_ipv4() { called=true; return 1; }
+  ip_node_line="test::::vmess::::192.0.2.9::::21870::::00000000-0000-0000-0000-000000000000::::password::::aes-256-gcm::::0"
+  outbound=$(_sing_template_generate_outbound "$ip_node_line")
+  [[ "$(printf '%s' "$outbound" | jq -r '.server')" == "192.0.2.9" && "$called" == "false" ]]
+); then
+  echo "literal proxy node IPv4 must bypass bootstrap lookup" >&2
+  exit 1
+fi
 
 if ! _sing_template_generate_config "" "utun99" "172.19.99.1/30" 7890 7891 "$node_line" "$tmp_dir" true > "$config_file"; then
   echo "failed to generate TUN config" >&2
@@ -43,6 +109,15 @@ assert not any(rule.get("inbound") == "dns-in" for rule in routes), "dns-in rout
 assert config.get("route", {}).get("auto_detect_interface") is True, "direct/bootstrap traffic must keep auto_detect_interface"
 assert tun_inbound is not None, "TUN inbound must exist"
 assert "geoip-cn" in tun_inbound.get("route_exclude_address_set", []), "CN IPs must bypass TUN routes at system routing layer"
+
+internal = next((s for s in config.get("dns", {}).get("servers", []) if s.get("tag") == "internal-dns"), None)
+assert internal is not None, "internal-dns server must exist"
+assert internal.get("type") == "udp", "TUN corp DNS must replace local internal-dns with udp"
+assert internal.get("server") == "172.16.1.100", "TUN corp DNS must use the discovered corp resolver"
+
+direct = next((o for o in config.get("outbounds", []) if o.get("tag") == "direct"), None)
+assert direct is not None, "direct outbound must exist"
+assert direct.get("domain_resolver") == "internal-dns", "direct domains must preserve corp split-DNS answers"
 
 fakeip_proxy_idx = next(
     (i for i, rule in enumerate(routes) if "198.18.0.0/15" in rule.get("ip_cidr", []) and rule.get("outbound") == "proxy"),
