@@ -179,7 +179,7 @@ _sing_source_list() {
     echo ""
     
     # Get all valid node names with a single yq call (same filter as _sing_region_get_nodes)
-    all_names=$(yq e '.proxies[] | select(.name | test("'"$info_pattern"'") | not) | select((.type == "vmess" and .uuid) or (.type == "ss" and .password)) | .name' "$file" 2>/dev/null)
+    all_names=$(yq e '.proxies[] | select(.name | test("'"$info_pattern"'") | not) | select((.type == "vmess" and .uuid) or (.type == "ss" and .password) or (.type == "vless" and .uuid)) | .name' "$file" 2>/dev/null)
     
     if [[ -z "$all_names" ]]; then
       echo "    (无有效节点)"
@@ -426,7 +426,22 @@ _sing_source_update() {
       return 1
     fi
     
-    yq e '{"proxies": [.proxies[] | select(.type == "vmess" or .type == "ss") | {"name": .name, "type": .type, "server": .server, "port": .port, "uuid": .uuid, "alterId": (.alterId // 0), "cipher": (.cipher // "auto"), "password": .password, "network": (.network // "tcp"), "tls": (.tls // false)}]}' "$temp_raw" > "$temp_yaml" 2>/dev/null
+    yq e '{"proxies": [.proxies[] | select(.type == "vmess" or .type == "ss" or .type == "vless") | {
+      "name": .name,
+      "type": .type,
+      "server": .server,
+      "port": .port,
+      "uuid": .uuid,
+      "alterId": (.alterId // 0),
+      "cipher": (.cipher // "auto"),
+      "password": .password,
+      "network": (.network // "tcp"),
+      "tls": (.tls // false),
+      "flow": .flow,
+      "servername": (.servername // .sni),
+      "client-fingerprint": (."client-fingerprint" // .fp),
+      "reality-opts": ."reality-opts"
+    }]}' "$temp_raw" > "$temp_yaml" 2>/dev/null
     
     if [[ $? -ne 0 ]]; then
       echo "错误: YAML 转换失败" >&2
@@ -434,83 +449,19 @@ _sing_source_update() {
       return 1
     fi
   else
-    # vmess:// subscription format (possibly base64 encoded)
+    # vmess:// / vless:// subscription format (possibly base64 encoded)
     echo "检测到订阅格式，正在解析..."
-    
-    # Process all vmess links in a single Python3 call for speed and encoding safety
-    PYTHONIOENCODING=utf-8 python3 -c "
-import sys, json, base64
 
-raw = open(sys.argv[1], 'r', encoding='utf-8', errors='replace').read().strip()
+    local uri_parser="${SING_RUN_SCRIPT_DIR:-${0:A:h}}/scripts/parse_uri_subscription.py"
+    if [[ ! -f "$uri_parser" ]]; then
+      echo "错误: 找不到订阅解析脚本: $uri_parser" >&2
+      rm -f "$temp_raw" "$temp_yaml"
+      return 1
+    fi
 
-# Try base64 decode the whole content
-try:
-    decoded = base64.b64decode(raw).decode('utf-8', errors='replace')
-    if 'vmess://' in decoded:
-        raw = decoded
-        print('已解码 base64 内容', file=sys.stderr)
-except Exception:
-    pass
-
-lines = [l.strip() for l in raw.splitlines() if l.strip().startswith('vmess://')]
-
-if not lines:
-    print('错误: 未找到 vmess:// 链接', file=sys.stderr)
-    sys.exit(1)
-
-out = open(sys.argv[2], 'w', encoding='utf-8')
-out.write('proxies:\n')
-
-count = 0
-errors = 0
-for line in lines:
-    b64_data = line[len('vmess://'):]
-    try:
-        node_json = base64.b64decode(b64_data + '==').decode('utf-8', errors='replace')
-        d = json.loads(node_json)
-    except Exception:
-        errors += 1
-        continue
-
-    name = str(d.get('ps', 'Unknown'))
-    server = str(d.get('add', ''))
-    port = d.get('port', '')
-    uuid = str(d.get('id', ''))
-    aid = d.get('aid', 0)
-    net = str(d.get('net', 'tcp'))
-    tls_val = str(d.get('tls', ''))
-
-    if not server or not port or not uuid:
-        errors += 1
-        continue
-
-    # Escape YAML special chars in name
-    safe_name = name.replace('\"', '\\\\\"')
-
-    out.write(f'  - name: \"{safe_name}\"\n')
-    out.write(f'    type: vmess\n')
-    out.write(f'    server: {server}\n')
-    out.write(f'    port: {port}\n')
-    out.write(f'    uuid: {uuid}\n')
-    out.write(f'    alterId: {aid}\n')
-    out.write(f'    cipher: auto\n')
-    out.write(f'    network: {net}\n')
-    if tls_val and tls_val.lower() not in ('', 'null', 'false', 'none', '0'):
-        out.write(f'    tls: true\n')
-    count += 1
-
-out.close()
-
-if errors > 0:
-    print(f'跳过 {errors} 个无效链接', file=sys.stderr)
-print(f'解析到 {count} 个节点', file=sys.stderr)
-
-if count == 0:
-    sys.exit(1)
-" "$temp_raw" "$temp_yaml" 2>&1
-    
+    PYTHONIOENCODING=utf-8 python3 "$uri_parser" "$temp_raw" "$temp_yaml" 2>&1
     if [[ $? -ne 0 ]]; then
-      echo "错误: vmess 解析失败" >&2
+      echo "错误: URI 订阅解析失败" >&2
       rm -f "$temp_raw" "$temp_yaml"
       return 1
     fi

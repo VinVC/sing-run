@@ -44,6 +44,26 @@ _sing_template_generate_outbound() {
   local node_password="${node_parts[6]}"
   local node_cipher="${node_parts[7]}"
   local node_alter_id="${node_parts[8]}"
+  local node_opts_raw="${node_parts[9]:-}"
+  [[ "$node_uuid" == "-" ]] && node_uuid=""
+  [[ "$node_password" == "-" ]] && node_password=""
+  [[ "$node_cipher" == "-" ]] && node_cipher=""
+  local node_opts='{}'
+  if [[ -n "$node_opts_raw" ]]; then
+    if [[ "$node_opts_raw" == \{* ]]; then
+      node_opts="$node_opts_raw"
+    else
+      local decoded=""
+      decoded=$(printf '%s' "$node_opts_raw" | base64 --decode 2>/dev/null) \
+        || decoded=$(printf '%s' "$node_opts_raw" | base64 -D 2>/dev/null) \
+        || decoded=$(printf '%s' "$node_opts_raw" | base64 -d 2>/dev/null) \
+        || decoded=""
+      [[ -n "$decoded" ]] && node_opts="$decoded"
+    fi
+    if ! printf '%s' "$node_opts" | jq -e . >/dev/null 2>&1; then
+      node_opts='{}'
+    fi
+  fi
 
   # Resolve the proxy endpoint before sing-box starts. If resolution fails,
   # preserve the hostname and let sing-box's direct-dns fallback handle it.
@@ -73,6 +93,51 @@ _sing_template_generate_outbound() {
             "domain_resolver": "direct-dns"
         }
 EOF
+  elif [[ "$node_type" == "vless" ]]; then
+    # VLESS (+ optional TLS / Reality / Vision flow)
+    jq -n \
+      --arg server "$outbound_server" \
+      --argjson port "$node_port" \
+      --arg uuid "$node_uuid" \
+      --argjson opts "$node_opts" '
+      {
+        type: "vless",
+        tag: "proxy",
+        server: $server,
+        server_port: $port,
+        uuid: $uuid,
+        domain_resolver: "direct-dns"
+      }
+      + (if (($opts.flow // "") | tostring | length) > 0 then {flow: ($opts.flow | tostring)} else {} end)
+      + (
+          if ($opts.security == "reality" or $opts.security == "tls") then
+            {
+              tls: (
+                {
+                  enabled: true,
+                  server_name: (($opts.sni // "") | tostring)
+                }
+                + (
+                    if (($opts.fp // "") | tostring | length) > 0 then
+                      {utls: {enabled: true, fingerprint: ($opts.fp | tostring)}}
+                    else {} end
+                  )
+                + (
+                    if $opts.security == "reality" then
+                      {
+                        reality: {
+                          enabled: true,
+                          public_key: (($opts.pbk // "") | tostring),
+                          short_id: (($opts.sid // "") | tostring)
+                        }
+                      }
+                    else {} end
+                  )
+              )
+            }
+          else {} end
+        )
+      '
   else
     # VMess (default)
     cat <<EOF

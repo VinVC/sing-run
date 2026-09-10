@@ -75,25 +75,76 @@ _sing_region_get_nodes() {
   # Use configured filter pattern (from sources.sh) or default
   local info_pattern="${SING_RUN_NODE_FILTER_PATTERN:-剩余流量|下次重置|套餐到期|用户群|使用说明}"
   
-  # Use yq to extract nodes in a format easy to parse with read
-  node_data=$(yq e '.proxies[] | select(.name | test("'"$region_name"'")) | 
-               select(.name | test("'$info_pattern'") | not) | 
-               select((.type == "vmess" and .uuid) or (.type == "ss" and .password)) | 
-               [.name, (.type // "vmess"), .server, .port, (.uuid // "-"), (.password // "-"), (.cipher // "-"), (.alterId // 0)] | join("\t")' "$proxies_file" 2>/dev/null)
-  
-  if [[ -n "$node_data" ]]; then
-    local name type server port uuid password cipher alterId
-    while IFS=$'\t' read -r name type server port uuid password cipher alterId; do
+  # yq → JSON, then jq filters nodes and packs VLESS TLS/Reality opts.
+  # (This yq build does not support if/then object construction reliably.)
+  node_data=$(
+    yq e -o=json '.proxies // []' "$proxies_file" 2>/dev/null \
+      | jq -c --arg region "$region_name" --arg info "$info_pattern" '
+          [
+            .[]
+            | select((.name // "") | test($region))
+            | select((.name // "") | test($info) | not)
+            | select(
+                (.type == "vmess" and .uuid)
+                or (.type == "ss" and .password)
+                or (.type == "vless" and .uuid)
+              )
+            | {
+                name: .name,
+                type: (.type // "vmess"),
+                server: .server,
+                port: (.port | tostring),
+                uuid: (.uuid // "-"),
+                password: (.password // "-"),
+                cipher: (.cipher // "-"),
+                alterId: ((.alterId // 0) | tostring),
+                opts: (
+                  if .type == "vless" then
+                    {
+                      flow: (.flow // ""),
+                      network: (.network // "tcp"),
+                      security: (
+                        if ."reality-opts" then "reality"
+                        elif .tls == true then "tls"
+                        else "none" end
+                      ),
+                      sni: ((.servername // .sni // "") | tostring),
+                      fp: ((."client-fingerprint" // .fp // "") | tostring),
+                      pbk: ((."reality-opts"."public-key" // "") | tostring),
+                      sid: ((."reality-opts"."short-id" // "") | tostring)
+                    }
+                  else {} end
+                )
+              }
+          ]
+        ' 2>/dev/null
+  )
+
+  if [[ -n "$node_data" && "$node_data" != "[]" ]]; then
+    local name type server port uuid password cipher alterId opts_b64
+    while IFS=$'\t' read -r name type server port uuid password cipher alterId opts_b64; do
       if [[ -n "$name" ]]; then
-        # Replace "-" placeholders back to empty string
-        [[ "$uuid" == "-" ]] && uuid=""
-        [[ "$password" == "-" ]] && password=""
-        [[ "$cipher" == "-" ]] && cipher=""
-        
-        # Store in array using a safe internal delimiter
-        nodes+=("${name}::::${type}::::${server}::::${port}::::${uuid}::::${password}::::${cipher}::::${alterId}")
+        # Keep "-" placeholders in the node line so consecutive empty fields
+        # do not collapse when splitting on "::::".
+        [[ -z "$uuid" ]] && uuid="-"
+        [[ -z "$password" ]] && password="-"
+        [[ -z "$cipher" ]] && cipher="-"
+        [[ -z "$alterId" ]] && alterId="0"
+        [[ -z "$opts_b64" ]] && opts_b64=""
+
+        nodes+=("${name}::::${type}::::${server}::::${port}::::${uuid}::::${password}::::${cipher}::::${alterId}::::${opts_b64}")
       fi
-    done <<< "$node_data"
+    done < <(printf '%s' "$node_data" | jq -r '.[] | [
+      .name,
+      .type,
+      .server,
+      .port,
+      .uuid,
+      .password,
+      .cipher,
+      .alterId,
+      (.opts | @json | @base64)
+    ] | @tsv')
   fi
   
   # Output nodes

@@ -316,8 +316,8 @@ sing-run update-nodes mp --file <文件> # 从本地文件更新
 ```
 
 支持的输入格式：
-- **Clash YAML** - 包含 `proxies:` 的 YAML 配置
-- **vmess:// 订阅** - base64 编码的 vmess 链接列表
+- **Clash YAML** - 包含 `proxies:` 的 YAML 配置（vmess / ss / vless）
+- **vmess:// / vless:// 订阅** - base64 编码的链接列表（含 Reality / Vision）
 
 ### 域名规则
 
