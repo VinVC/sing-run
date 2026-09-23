@@ -165,11 +165,14 @@ _sing_instance_ensure_dirs() {
   mkdir -p "$instance_dir/cache"
 }
 
-# DNS answers can differ between home and corporate networks. Do not carry a
-# persistent sing-box DNS cache into a new TUN session.
+# Home and corporate resolvers return different answers. Those answers are not
+# written to cache.db because store_dns stays off, so they die with the process.
+# The file itself must stay: it holds FakeIP mappings. Chrome keeps
+# 198.18.0.0/15 addresses in its own per-profile cache and times out when the
+# next sing-box process no longer knows which domain they belong to.
 _sing_instance_clear_dns_cache() {
-  local instance_dir="$1"
-  rm -f "$instance_dir/cache/cache.db"
+  # $1 is the instance directory. cache/cache.db is left in place on purpose.
+  return 0
 }
 
 # =============================================================================

@@ -27,9 +27,9 @@ if ! (
   exit 1
 fi
 
-touch "$tmp_dir/cache/cache.db"
-if ! _sing_instance_clear_dns_cache "$tmp_dir" || [[ -e "$tmp_dir/cache/cache.db" ]]; then
-  echo "persistent sing-box DNS cache was not cleared" >&2
+printf 'fakeip' > "$tmp_dir/cache/cache.db"
+if ! _sing_instance_clear_dns_cache "$tmp_dir" || [[ "$(cat "$tmp_dir/cache/cache.db")" != "fakeip" ]]; then
+  echo "FakeIP cache must survive a TUN restart" >&2
   exit 1
 fi
 
@@ -107,6 +107,9 @@ tun_inbound = next((inbound for inbound in inbounds if inbound.get("type") == "t
 assert not any(inbound.get("tag") == "dns-in" for inbound in inbounds), "TUN config must not depend on /etc/resolver -> dns-in"
 assert not any(rule.get("inbound") == "dns-in" for rule in routes), "dns-in route rule must not be present"
 assert config.get("route", {}).get("auto_detect_interface") is True, "direct/bootstrap traffic must keep auto_detect_interface"
+cache_file = config.get("experimental", {}).get("cache_file", {})
+assert cache_file.get("store_fakeip") is True, "FakeIP mappings must persist across TUN restarts"
+assert not cache_file.get("store_dns"), "real DNS answers must not persist across home and corp networks"
 assert tun_inbound is not None, "TUN inbound must exist"
 assert "sniff" not in tun_inbound, "legacy inbound sniff was removed in sing-box 1.13"
 assert "sniff_override_destination" not in tun_inbound, "legacy inbound sniff_override_destination was removed in sing-box 1.13"

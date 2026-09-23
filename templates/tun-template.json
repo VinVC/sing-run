@@ -207,7 +207,8 @@
     "experimental": {
         "cache_file": {
             "enabled": true,
-            "path": "{{CACHE_FILE}}"
+            "path": "{{CACHE_FILE}}",
+            "store_fakeip": true
         }
     }
 }
