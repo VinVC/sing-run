@@ -108,6 +108,9 @@ assert not any(inbound.get("tag") == "dns-in" for inbound in inbounds), "TUN con
 assert not any(rule.get("inbound") == "dns-in" for rule in routes), "dns-in route rule must not be present"
 assert config.get("route", {}).get("auto_detect_interface") is True, "direct/bootstrap traffic must keep auto_detect_interface"
 assert tun_inbound is not None, "TUN inbound must exist"
+assert "sniff" not in tun_inbound, "legacy inbound sniff was removed in sing-box 1.13"
+assert "sniff_override_destination" not in tun_inbound, "legacy inbound sniff_override_destination was removed in sing-box 1.13"
+assert any(rule.get("action") == "sniff" for rule in routes), "protocol sniff must be a route action"
 assert "geoip-cn" in tun_inbound.get("route_exclude_address_set", []), "CN IPs must bypass TUN routes at system routing layer"
 
 internal = next((s for s in config.get("dns", {}).get("servers", []) if s.get("tag") == "internal-dns"), None)

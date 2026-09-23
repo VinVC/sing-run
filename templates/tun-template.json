@@ -81,9 +81,7 @@
                 "geoip-cn"
             ],
             "strict_route": true,
-            "stack": "mixed",
-            "sniff": true,
-            "sniff_override_destination": true
+            "stack": "mixed"
         },
         {
             "type": "socks",
