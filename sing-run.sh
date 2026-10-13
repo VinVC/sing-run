@@ -139,6 +139,10 @@ _sing_run_show_help() {
   sing-run regions                  # 列出所有可用区域
   sing-run sources                  # 列出所有可用源
 
+应用:
+  sing-run codex [区域]             # 用该区域的 HTTP 代理单独启动 Codex
+                                    # 默认 tw，只作用于 Codex 进程
+
 维护:
   sing-run update-nodes              # 更新所有源的节点列表
   sing-run update-nodes <源>        # 更新指定源的节点列表
@@ -426,6 +430,89 @@ _sing_run_handle_rules() {
   return $result
 }
 
+# Launch Codex with one instance's HTTP proxy.
+# The proxy is applied only to that process. System proxy, launchd
+# environment, and other sing-run instances are left unchanged.
+_sing_run_codex() {
+  local region="${1:-tw}"
+
+  if [[ "$region" == "-h" || "$region" == "--help" ]]; then
+    cat << 'EOF'
+用法: sing-run codex [区域]
+
+用指定区域正在监听的 HTTP 代理启动 Codex（ChatGPT.app）。
+默认区域是 tw。只给 Codex 进程设置 HTTP_PROXY / HTTPS_PROXY，
+不修改系统代理、登录会话环境变量，也不动其他实例。
+
+示例:
+  sing-run codex                    # 使用台湾实例
+  sing-run codex usa                # 使用美国实例
+EOF
+    return 0
+  fi
+
+  if [[ -n "$2" ]]; then
+    echo "错误: 参数过多。用法: sing-run codex [区域]"
+    return 1
+  fi
+
+  local region_name="${SING_RUN_REGIONS[$region]}"
+  if [[ -z "$region_name" ]]; then
+    echo "错误: 未知的地区代码 '$region'"
+    echo "使用 'sing-run regions' 查看可用区域"
+    return 1
+  fi
+
+  if ! _sing_instance_is_running "$region"; then
+    echo "错误: $region_name ($region) 实例未运行"
+    echo "先启动: sing-run $region"
+    return 1
+  fi
+
+  local http_port
+  read _ _ _ http_port _ <<< "$(_sing_instance_get_config "$region")"
+  local proxy="http://127.0.0.1:${http_port}"
+  if ! lsof -nP -iTCP:"$http_port" -sTCP:LISTEN &>/dev/null; then
+    echo "错误: $region_name HTTP 代理 $proxy 未在监听"
+    return 1
+  fi
+
+  local app="/Applications/ChatGPT.app/Contents/MacOS/ChatGPT"
+  if [[ ! -x "$app" ]]; then
+    echo "错误: 未找到 Codex 应用 $app"
+    return 1
+  fi
+
+  local old_pid
+  old_pid=$(pgrep -f '/Applications/ChatGPT.app/Contents/MacOS/ChatGPT$' | head -1)
+  if [[ -n "$old_pid" ]]; then
+    osascript -e 'quit app "ChatGPT"' >/dev/null 2>&1
+    local i=0
+    while [[ $i -lt 20 ]] && ps -p "$old_pid" >/dev/null 2>&1; do
+      sleep 1
+      i=$((i + 1))
+    done
+    if ps -p "$old_pid" >/dev/null 2>&1; then
+      echo "错误: Codex 仍在运行，请先手动退出后再执行 sing-run codex"
+      return 1
+    fi
+  fi
+
+  # env -u drops a proxy inherited by this shell so only the selected
+  # instance is visible to Codex.
+  nohup env \
+    -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+    HTTP_PROXY="$proxy" \
+    HTTPS_PROXY="$proxy" \
+    NO_PROXY="localhost,127.0.0.1,::1" \
+    "$app" >/dev/null 2>&1 &
+  disown
+
+  echo "✓ 已用 $region_name ($region) 的 HTTP 代理启动 Codex"
+  echo "  $proxy"
+  echo "  仅此进程使用该代理，未修改系统代理或其他实例"
+}
+
 # List nodes for a specific region
 _sing_run_list_nodes() {
   local region="$1"
@@ -551,6 +638,10 @@ sing-run() {
     status)
       # Show all running instances
       _sing_instance_status
+      ;;
+    codex)
+      shift
+      _sing_run_codex "$@"
       ;;
     restart)
       # Restart instances

@@ -347,6 +347,15 @@ sing-run sources                      # 列出所有可用源及节点
 sing-run --help                       # 完整帮助信息
 ```
 
+### 单独启动 Codex
+
+```bash
+sing-run codex                        # 用台湾实例的 HTTP 代理启动 Codex
+sing-run codex usa                    # 用指定区域的 HTTP 代理启动
+```
+
+只给 Codex 进程设置 `HTTP_PROXY` / `HTTPS_PROXY`，指向该区域正在监听的本地 HTTP 端口。不修改系统代理、登录会话环境变量，也不改其他实例。目标区域必须已经在运行。
+
 ## 代理使用方式
 
 ### 方式一：TUN 透明代理
