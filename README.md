@@ -288,6 +288,21 @@ sing-run restart                      # 重启所有运行中的实例
 sing-run untun                        # 关闭 TUN 透明代理（自动重启为普通模式）
 ```
 
+### 恢复上次运行
+
+```bash
+sing-run restore                      # 恢复上次一起运行的区域、源、节点和 TUN
+```
+
+实例启动成功后，区域、源、节点名和是否启用 TUN 会写入 `~/.sing-run/state/last-session.json`。节点名是匹配依据，索引只在名字找不到时作后备。
+
+- 单独 `sing-run stop <区域>` 会把该区域从记录里去掉
+- `sing-run stop` 停止全部时保留停止前的整组记录
+- 已经在运行的区域会跳过；源不可用或节点已不在列表中的区域会跳过并继续其余区域
+- 普通代理先启动，带 TUN 的区域最后启动
+
+`sing-run status` 在没有区域实例运行、但记录还在时，会显示这段「上次运行」。
+
 ### 节点操作
 
 ```bash
@@ -342,6 +357,7 @@ sing-run plugin                       # 查看已加载的插件
 
 ```bash
 sing-run status                       # 查看所有运行的实例
+sing-run restore                      # 恢复上次运行的区域和节点
 sing-run regions                      # 列出所有可用区域
 sing-run sources                      # 列出所有可用源及节点
 sing-run --help                       # 完整帮助信息
@@ -674,6 +690,8 @@ docker compose logs -f sing-run
 
 ```
 ~/.sing-run/
+├── state/
+│   └── last-session.json              # 上次一起运行的区域、源、节点和 TUN
 ├── instances/                         # 实例运行时数据
 │   ├── jp/
 │   │   ├── config/config.json         # 生成的 sing-box 配置
@@ -747,6 +765,7 @@ sing-run/
     ├─→ sources.sh (用户配置) → 确定可用源
     ├─→ proxies-*.yaml (节点数据) → 获取节点列表
     ├─→ state/ (实例状态) → 读取当前源/节点/TUN 状态
+    ├─→ state/last-session.json → 上次一起运行的区域集合
     ├─→ rules/ (域名规则) → 生成自定义路由和 DNS 规则
     ├─→ template.json → 模板引擎 → config.json
     └─→ sing-box run -c config.json → 启动代理进程

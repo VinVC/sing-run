@@ -7,6 +7,7 @@
 # =============================================================================
 
 SING_RUN_INSTANCES_DIR="$SING_RUN_DIR/instances"
+SING_RUN_SESSION_FILE="$SING_RUN_DIR/state/last-session.json"
 
 # Region to instance number mapping (0-based)
 typeset -A SING_RUN_INSTANCE_MAP
@@ -543,6 +544,9 @@ _sing_instance_start() {
         _sing_system_flush_dns_cache
       fi
     fi
+
+    # Remember this region as part of the last running set.
+    _sing_session_record_region "$region" || true
     
     return 0
   else
@@ -695,6 +699,300 @@ _sing_instance_stop_all() {
 }
 
 # =============================================================================
+# Last-session restore
+# =============================================================================
+
+_sing_session_require_jq() {
+  command -v jq >/dev/null 2>&1
+}
+
+# Build one session entry from the region's saved source, node, and TUN flag.
+_sing_session_entry_for_region() {
+  local region="$1"
+  local source node_index node_name tun nodes_output line node_line
+  local -a nodes=() node_parts=()
+
+  source=$(_sing_source_get_instance "$region")
+  node_index=$(_sing_instance_get_node "$region")
+  node_name=""
+  nodes_output=$(_sing_region_get_nodes "$region" "$source" 2>/dev/null) || true
+  if [[ -n "$nodes_output" ]]; then
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && nodes+=("$line")
+    done <<< "$nodes_output"
+    if [[ "$node_index" =~ ^[0-9]+$ ]] && [[ $node_index -lt ${#nodes[@]} ]]; then
+      node_line="${nodes[$((node_index + 1))]}"
+      node_parts=("${(@s[::::])node_line}")
+      node_name="${node_parts[1]}"
+    fi
+  fi
+
+  tun=false
+  local auto_route_file="$SING_RUN_INSTANCES_DIR/$region/state/auto_route.txt"
+  if [[ -f "$auto_route_file" ]] && [[ "$(cat "$auto_route_file")" == "true" ]]; then
+    tun=true
+  fi
+
+  jq -nc \
+    --arg region "$region" \
+    --arg source "$source" \
+    --argjson node_index "$node_index" \
+    --arg node_name "$node_name" \
+    --argjson tun "$tun" \
+    '{region:$region, source:$source, node_index:$node_index, node_name:$node_name, tun:$tun}'
+}
+
+_sing_session_write() {
+  local instances_json="$1"
+  mkdir -p "${SING_RUN_SESSION_FILE:h}"
+  local tmp
+  tmp="$(mktemp "${SING_RUN_SESSION_FILE:h}/last-session.XXXXXX")"
+  if ! jq -n --argjson instances "$instances_json" '{version:1, instances:$instances}' > "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  mv "$tmp" "$SING_RUN_SESSION_FILE"
+}
+
+# Add or replace one region in the last-session file.
+_sing_session_upsert_entry() {
+  local entry="$1"
+  local instances="[]"
+  if [[ -f "$SING_RUN_SESSION_FILE" ]]; then
+    instances=$(jq -c '(.instances // []) | map(select(.region != $entry.region)) + [$entry]' \
+      --argjson entry "$entry" "$SING_RUN_SESSION_FILE" 2>/dev/null) || instances="[$entry]"
+  else
+    instances="[$entry]"
+  fi
+  _sing_session_write "$instances"
+}
+
+_sing_session_record_region() {
+  local region="$1"
+  if ! _sing_session_require_jq; then
+    echo "警告: 未找到 jq，无法记录上次运行" >&2
+    return 1
+  fi
+  local entry
+  entry=$(_sing_session_entry_for_region "$region") || return 1
+  _sing_session_upsert_entry "$entry"
+}
+
+# Replace the session with every region that is running right now.
+# An empty running set leaves the previous file untouched.
+_sing_session_snapshot_running() {
+  if ! _sing_session_require_jq; then
+    return 1
+  fi
+  local -a entries=()
+  local region entry
+  for region in "${SING_RUN_REGION_ORDER[@]}"; do
+    if _sing_instance_is_running "$region"; then
+      entry=$(_sing_session_entry_for_region "$region") || continue
+      [[ -n "$entry" ]] && entries+=("$entry")
+    fi
+  done
+  if [[ ${#entries[@]} -eq 0 ]]; then
+    return 0
+  fi
+  local instances
+  instances=$(printf '%s\n' "${entries[@]}" | jq -sc '.') || return 1
+  _sing_session_write "$instances"
+}
+
+# Drop one region after the user explicitly stops it.
+_sing_session_remove() {
+  local region="$1"
+  [[ -f "$SING_RUN_SESSION_FILE" ]] || return 0
+  _sing_session_require_jq || return 1
+  local instances
+  instances=$(jq -c --arg region "$region" \
+    '[(.instances // [])[] | select(.region != $region)]' \
+    "$SING_RUN_SESSION_FILE") || return 1
+  _sing_session_write "$instances"
+}
+
+_sing_session_describe() {
+  local entry="$1"
+  local region source node_index node_name tun region_name source_name label node_label
+  region=$(jq -r '.region' <<< "$entry")
+  source=$(jq -r '.source' <<< "$entry")
+  node_index=$(jq -r '.node_index' <<< "$entry")
+  node_name=$(jq -r '.node_name // ""' <<< "$entry")
+  tun=$(jq -r '.tun' <<< "$entry")
+  region_name="${SING_RUN_REGIONS[$region]:-$region}"
+  source_name=$(_sing_source_get_name "$source")
+  label="代理"
+  [[ "$tun" == "true" ]] && label="TUN"
+  if [[ -n "$node_name" ]]; then
+    node_label="$node_name"
+  else
+    node_label="索引 ${node_index}"
+  fi
+  echo "  ${region_name} (${region}) · ${source_name} (${source}) · ${node_label} · ${label}"
+}
+
+# Match the saved node name first. Fall back to the old index when it still exists.
+# Prints the resolved index on stdout.
+_sing_session_resolve_node() {
+  local region="$1"
+  local source="$2"
+  local node_index="$3"
+  local node_name="$4"
+  local nodes_output line node_line name i
+  local -a nodes=() node_parts=()
+
+  [[ "$node_index" =~ ^[0-9]+$ ]] || node_index=-1
+  nodes_output=$(_sing_region_get_nodes "$region" "$source" 2>/dev/null) || true
+  if [[ -n "$nodes_output" ]]; then
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && nodes+=("$line")
+    done <<< "$nodes_output"
+  fi
+
+  if [[ -n "$node_name" ]]; then
+    i=0
+    for node_line in "${nodes[@]}"; do
+      node_parts=("${(@s[::::])node_line}")
+      name="${node_parts[1]}"
+      if [[ "$name" == "$node_name" ]]; then
+        if [[ $i -ne $node_index ]]; then
+          echo "  节点「${node_name}」索引 ${node_index} → ${i}" >&2
+        fi
+        echo "$i"
+        return 0
+      fi
+      i=$((i + 1))
+    done
+  fi
+
+  if [[ $node_index -ge 0 && $node_index -lt ${#nodes[@]} ]]; then
+    node_line="${nodes[$((node_index + 1))]}"
+    node_parts=("${(@s[::::])node_line}")
+    if [[ -n "$node_name" ]]; then
+      echo "  未找到节点「${node_name}」，改用索引 ${node_index}（${node_parts[1]}）" >&2
+    fi
+    echo "$node_index"
+    return 0
+  fi
+
+  echo "  跳过 ${region}: 节点「${node_name}」已不在列表中" >&2
+  return 1
+}
+
+# Returns 0 on success, 10 when the region is already running, 1 on failure.
+_sing_session_restore_one() {
+  local entry="$1"
+  local region source node_index node_name tun region_name resolved auto_route
+  region=$(jq -r '.region' <<< "$entry")
+  source=$(jq -r '.source' <<< "$entry")
+  node_index=$(jq -r '.node_index' <<< "$entry")
+  node_name=$(jq -r '.node_name // ""' <<< "$entry")
+  tun=$(jq -r '.tun' <<< "$entry")
+  region_name="${SING_RUN_REGIONS[$region]:-$region}"
+
+  if [[ -z "${SING_RUN_REGIONS[$region]}" ]]; then
+    echo "跳过 ${region}: 未知区域"
+    return 1
+  fi
+  if _sing_instance_is_running "$region"; then
+    echo "跳过 ${region_name} (${region}): 已在运行"
+    return 10
+  fi
+  if ! _sing_source_is_valid "$source"; then
+    echo "跳过 ${region_name} (${region}): 源 ${source} 不可用"
+    return 1
+  fi
+  if ! _sing_source_file_exists "$source"; then
+    echo "跳过 ${region_name} (${region}): 请先运行 sing-run update-nodes ${source}"
+    return 1
+  fi
+  if ! resolved=$(_sing_session_resolve_node "$region" "$source" "$node_index" "$node_name"); then
+    return 1
+  fi
+  if ! _sing_source_set_instance "$region" "$source"; then
+    return 1
+  fi
+
+  auto_route=""
+  [[ "$tun" == "true" ]] && auto_route="true"
+  _sing_instance_start "$region" "$resolved" "$auto_route"
+}
+
+_sing_session_restore() {
+  if ! _sing_session_require_jq; then
+    echo "错误: 需要 jq 才能恢复上次运行" >&2
+    return 1
+  fi
+  if [[ ! -f "$SING_RUN_SESSION_FILE" ]]; then
+    echo "没有可恢复的上次运行"
+    return 1
+  fi
+  if ! jq -e '.instances | type == "array"' "$SING_RUN_SESSION_FILE" >/dev/null 2>&1; then
+    echo "上次运行记录无法读取: $SING_RUN_SESSION_FILE" >&2
+    return 1
+  fi
+
+  local count
+  count=$(jq '.instances | length' "$SING_RUN_SESSION_FILE")
+  if [[ "$count" -eq 0 ]]; then
+    echo "没有可恢复的上次运行"
+    return 1
+  fi
+
+  echo ""
+  echo "上次运行:"
+  local line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && _sing_session_describe "$line"
+  done < <(jq -c '.instances[]' "$SING_RUN_SESSION_FILE")
+  echo ""
+
+  local -a normal=() tuns=()
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    if [[ "$(jq -r '.tun' <<< "$line")" == "true" ]]; then
+      tuns+=("$line")
+    else
+      normal+=("$line")
+    fi
+  done < <(jq -c '.instances[]' "$SING_RUN_SESSION_FILE")
+
+  local ok=0 skipped=0 failed=0 rc entry
+  for entry in "${normal[@]}" "${tuns[@]}"; do
+    _sing_session_restore_one "$entry"
+    rc=$?
+    if [[ $rc -eq 0 ]]; then
+      ok=$((ok + 1))
+    elif [[ $rc -eq 10 ]]; then
+      skipped=$((skipped + 1))
+    else
+      failed=$((failed + 1))
+    fi
+    echo ""
+  done
+
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "已恢复 ${ok} 个，跳过 ${skipped} 个，失败 ${failed} 个"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  [[ $failed -eq 0 ]]
+}
+
+# Shown by status when no region instance is running.
+_sing_session_print_idle() {
+  [[ -f "$SING_RUN_SESSION_FILE" ]] || return 0
+  _sing_session_require_jq || return 0
+  local count line
+  count=$(jq '.instances | length' "$SING_RUN_SESSION_FILE" 2>/dev/null) || return 0
+  [[ "$count" =~ ^[0-9]+$ && "$count" -gt 0 ]] || return 0
+  echo ""
+  echo "  上次运行（sing-run restore 可恢复）:"
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && _sing_session_describe "$line"
+  done < <(jq -c '.instances[]' "$SING_RUN_SESSION_FILE")
+}
+
+# =============================================================================
 # Instance Status and Listing
 # =============================================================================
 
@@ -777,6 +1075,7 @@ _sing_instance_status() {
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
   
+  local region_running=$running_count
   local extra_count=$(_sing_plugin_status_count)
   if [[ -n "$extra_count" && "$extra_count" -gt 0 ]] 2>/dev/null; then
     running_count=$((running_count + extra_count))
@@ -784,11 +1083,15 @@ _sing_instance_status() {
   
   if [[ $running_count -eq 0 ]]; then
     echo "  没有运行中的实例"
+    _sing_session_print_idle
   else
     for line in "${status_lines[@]}"; do
       echo -e "$line"
     done
     _sing_plugin_status
+    if [[ $region_running -eq 0 ]]; then
+      _sing_session_print_idle
+    fi
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "  $running_count 个实例运行中"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

@@ -103,6 +103,7 @@ _sing_run_show_help() {
   sing-run <区域> [选项]            # 启动并设置源/节点
   sing-run stop [区域]              # 停止实例
   sing-run restart [区域]           # 重启实例（保持当前模式）
+  sing-run restore                  # 恢复上次运行的区域和节点
   sing-run status                   # 查看所有实例
 
 启动实例:
@@ -132,6 +133,9 @@ _sing_run_show_help() {
 重启实例:
   sing-run restart jp               # 重启日本实例（保持 TUN/代理模式）
   sing-run restart                  # 重启所有运行中的实例
+
+恢复上次运行:
+  sing-run restore                  # 拉起上次一起运行的区域，并恢复源、节点和 TUN
 
 查看信息:
   sing-run status                   # 查看所有运行的实例
@@ -183,6 +187,8 @@ EOF
   4. sing-run jp --node next        # 日本切换节点
   5. sing-run status                # 查看所有实例状态
   6. sing-run stop usa              # 停止美国，保留日本
+  7. sing-run stop                  # 停止全部，保留上次运行记录
+  8. sing-run restore               # 一键恢复上次的区域和节点
 
 说明:
   • 每个区域有独立的 TUN 接口、IP 和端口
@@ -623,11 +629,22 @@ sing-run() {
     # Global commands
     stop|-x)
       if [[ -n "$2" ]]; then
-        _sing_instance_stop "$2"
+        if _sing_instance_is_running "$2"; then
+          if _sing_instance_stop "$2"; then
+            _sing_session_remove "$2" || true
+          fi
+        else
+          _sing_instance_stop "$2"
+        fi
       else
+        # Keep the running set. Per-region removal would wipe it during stop-all.
+        _sing_session_snapshot_running || true
         _sing_plugin_stop_all
         _sing_instance_stop_all
       fi
+      ;;
+    restore)
+      _sing_session_restore
       ;;
     plugin)
       echo ""
