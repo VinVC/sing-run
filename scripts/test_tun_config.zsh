@@ -51,7 +51,7 @@ SING_RUN_DIRECT_RULES="$SING_RUN_RULES_DIR/direct-domains.txt"
 mkdir -p "$SING_RUN_RULES_DIR"
 _sing_rules_add_proxy "*.OpenAI.com" >/dev/null
 _sing_rules_add_proxy "142.171.111.176/32" >/dev/null
-_sing_rules_add_direct ".fuyoukache.com" >/dev/null
+_sing_rules_add_direct ".foru56.com" >/dev/null
 _sing_rules_add_direct "120.27.155.114" >/dev/null
 
 node_line="test::::vmess::::shh.itea.la::::21870::::00000000-0000-0000-0000-000000000000::::password::::aes-256-gcm::::0"
@@ -152,11 +152,11 @@ assert ".openai.com" in custom_proxy_route.get("domain_suffix", []), "custom pro
 assert not any("openai.com" == suffix for suffix in custom_proxy_route.get("domain_suffix", [])), "custom suffix matcher must be explicit"
 
 custom_direct_route = next(
-    (rule for rule in routes if rule.get("outbound") == "direct" and "fuyoukache.com" in rule.get("domain", [])),
+    (rule for rule in routes if rule.get("outbound") == "direct" and "foru56.com" in rule.get("domain", [])),
     None,
 )
 assert custom_direct_route is not None, "custom direct domain must produce an exact domain matcher"
-assert ".fuyoukache.com" in custom_direct_route.get("domain_suffix", []), "custom direct domain must match subdomains"
+assert ".foru56.com" in custom_direct_route.get("domain_suffix", []), "custom direct domain must match subdomains"
 
 assert any(
     rule.get("outbound") == "proxy" and "142.171.111.176/32" in rule.get("ip_cidr", [])
@@ -172,7 +172,7 @@ assert any(
     for rule in dns_rules
 ), "custom proxy DNS must use fakeip with exact and subdomain matchers"
 assert any(
-    rule.get("server") == "internal-dns" and "fuyoukache.com" in rule.get("domain", []) and ".fuyoukache.com" in rule.get("domain_suffix", [])
+    rule.get("server") == "internal-dns" and "foru56.com" in rule.get("domain", []) and ".foru56.com" in rule.get("domain_suffix", [])
     for rule in dns_rules
 ), "custom direct DNS must use internal DNS with exact and subdomain matchers"
 PY
