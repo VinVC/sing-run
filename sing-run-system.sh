@@ -255,18 +255,20 @@ _sing_system_check_dependencies() {
 # Network Testing
 # =============================================================================
 
-# Test if a port is listening
+# Test local TCP reachability rather than inspecting process ownership.
+# On macOS, unprivileged lsof cannot see root-owned TUN listeners.
 _sing_system_is_port_listening() {
   local port="$1"
-  
-  if command -v lsof &> /dev/null; then
-    lsof -i ":$port" -sTCP:LISTEN &>/dev/null
-  elif command -v netstat &> /dev/null; then
-    netstat -an | grep -q "LISTEN.*:$port"
-  else
-    # Fallback: try to connect
-    (echo > /dev/tcp/127.0.0.1/$port) 2>/dev/null
-  fi
+  python3 - "$port" <<'PY'
+import socket
+import sys
+
+try:
+    with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2):
+        pass
+except (OSError, ValueError, OverflowError):
+    sys.exit(1)
+PY
 }
 
 # =============================================================================

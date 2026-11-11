@@ -363,14 +363,21 @@ sing-run sources                      # 列出所有可用源及节点
 sing-run --help                       # 完整帮助信息
 ```
 
-### 单独启动 Codex
+### 单独启动 ChatGPT / Codex / T3 Code
 
 ```bash
+sing-run chatgpt                      # 用日本实例的 HTTP 代理启动 ChatGPT
+sing-run chatgpt jp                   # 指定区域；请先手动退出 ChatGPT
+sing-run t3 jp                        # 用日本实例的 HTTP 代理启动 T3 Code
 sing-run codex                        # 用台湾实例的 HTTP 代理启动 Codex
 sing-run codex usa                    # 用指定区域的 HTTP 代理启动
 ```
 
-只给 Codex 进程设置 `HTTP_PROXY` / `HTTPS_PROXY`，指向该区域正在监听的本地 HTTP 端口。不修改系统代理、登录会话环境变量，也不改其他实例。目标区域必须已经在运行。
+为应用进程设置 `HTTP_PROXY` / `HTTPS_PROXY`（同时设置小写变量），并传入 Electron 的 `--proxy-server`，让原生客户端和界面层的 HTTPS / WebSocket 请求使用同一个本地 HTTP 代理。目标区域必须已经在运行。代理设置仅作用于新启动的应用进程。
+
+`sing-run chatgpt` 在应用仍运行时会提示先手动退出。退出应用后重新执行，代理设置随新进程生效。它使用所选区域当前保存的源和节点。`sing-run codex` 保留原有的自动退出并重新启动应用行为。
+
+`sing-run t3` 同样默认使用 `jp`，支持安装在 `/Applications` 的 T3 Code Beta 和 T3 Code。请先退出 T3 Code，再执行命令。代理环境会随 T3 进程传给它启动的 Codex 客户端，用于模型请求及远程压缩等任务。若 T3 作为后台服务独立运行，需要在该服务的启动环境中设置代理并重启服务。
 
 ## 代理使用方式
 

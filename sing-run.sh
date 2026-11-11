@@ -144,6 +144,10 @@ _sing_run_show_help() {
   sing-run sources                  # 列出所有可用源
 
 应用:
+  sing-run chatgpt [区域]           # 用该区域的 HTTP 代理启动 ChatGPT，默认 jp
+                                    # 请先退出 ChatGPT；不重启代理或 TUN
+  sing-run t3 [区域]                # 用该区域的 HTTP 代理启动 T3 Code，默认 jp
+                                    # 请先退出 T3 Code，再重新启动
   sing-run codex [区域]             # 用该区域的 HTTP 代理单独启动 Codex
                                     # 默认 tw，只作用于 Codex 进程
 
@@ -440,25 +444,59 @@ _sing_run_handle_rules() {
 # The proxy is applied only to that process. System proxy, launchd
 # environment, and other sing-run instances are left unchanged.
 _sing_run_codex() {
-  local region="${1:-tw}"
+  _sing_run_proxy_app codex tw true "$@"
+}
+
+_sing_run_chatgpt() {
+  _sing_run_proxy_app chatgpt jp false "$@"
+}
+
+_sing_run_t3() {
+  _sing_run_proxy_app t3 jp false "$@"
+}
+
+_sing_run_proxy_app_binary() {
+  if [[ "$1" == "t3" ]]; then
+    local app
+    for app in "/Applications/T3 Code (Beta).app/Contents/MacOS/T3 Code (Beta)" \
+               "/Applications/T3 Code.app/Contents/MacOS/T3 Code"; do
+      if [[ -x "$app" ]]; then
+        print -r -- "$app"
+        return 0
+      fi
+    done
+    return 1
+  fi
+  print -r -- "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT"
+}
+
+_sing_run_proxy_app() {
+  local app_command="$1" default_region="$2" allow_quit="$3"
+  shift 3
+  local region="${1:-$default_region}"
+  local app_label="ChatGPT"
+  [[ "$app_command" == "codex" ]] && app_label="Codex"
+  [[ "$app_command" == "t3" ]] && app_label="T3 Code"
 
   if [[ "$region" == "-h" || "$region" == "--help" ]]; then
-    cat << 'EOF'
-用法: sing-run codex [区域]
+    cat << EOF
+用法: sing-run $app_command [区域]
 
-用指定区域正在监听的 HTTP 代理启动 Codex（ChatGPT.app）。
-默认区域是 tw。只给 Codex 进程设置 HTTP_PROXY / HTTPS_PROXY，
-不修改系统代理、登录会话环境变量，也不动其他实例。
+用指定区域正在监听的 HTTP 代理启动 $app_label。
+默认区域是 $default_region。为客户端设置 HTTP_PROXY / HTTPS_PROXY，
+并用 --proxy-server 覆盖界面层的 HTTPS / WebSocket 代理。
+不修改系统代理、登录会话环境变量，也不启动、停止或重启任何代理实例。
 
 示例:
-  sing-run codex                    # 使用台湾实例
-  sing-run codex usa                # 使用美国实例
+  sing-run $app_command
+  sing-run $app_command usa
 EOF
+    [[ "$allow_quit" == "false" ]] && echo "请先手动退出 $app_label，再运行此命令。"
     return 0
   fi
 
-  if [[ -n "$2" ]]; then
-    echo "错误: 参数过多。用法: sing-run codex [区域]"
+  if [[ $# -gt 1 ]]; then
+    echo "错误: 参数过多。用法: sing-run $app_command [区域]"
     return 1
   fi
 
@@ -478,45 +516,67 @@ EOF
   local http_port
   read _ _ _ http_port _ <<< "$(_sing_instance_get_config "$region")"
   local proxy="http://127.0.0.1:${http_port}"
-  if ! lsof -nP -iTCP:"$http_port" -sTCP:LISTEN &>/dev/null; then
-    echo "错误: $region_name HTTP 代理 $proxy 未在监听"
+  if ! _sing_system_is_port_listening "$http_port"; then
+    echo "错误: 无法连接 $region_name HTTP 代理 $proxy"
     return 1
   fi
 
-  local app="/Applications/ChatGPT.app/Contents/MacOS/ChatGPT"
-  if [[ ! -x "$app" ]]; then
-    echo "错误: 未找到 Codex 应用 $app"
+  local app
+  app=$(_sing_run_proxy_app_binary "$app_command")
+  if [[ -z "$app" || ! -x "$app" ]]; then
+    echo "错误: 未找到 $app_label 应用"
     return 1
   fi
 
-  local old_pid
-  old_pid=$(pgrep -f '/Applications/ChatGPT.app/Contents/MacOS/ChatGPT$' | head -1)
+  local old_pid process_pattern
+  process_pattern=$(python3 - "$app" <<'PY'
+import re
+import sys
+print("^" + re.escape(sys.argv[1]) + "( |$)")
+PY
+  )
+  old_pid=$(pgrep -f "$process_pattern" | head -1)
   if [[ -n "$old_pid" ]]; then
-    osascript -e 'quit app "ChatGPT"' >/dev/null 2>&1
+    if [[ "$allow_quit" == "false" ]]; then
+      echo "错误: $app_label 正在运行，请先手动退出后再执行 sing-run $app_command $region"
+      return 1
+    fi
+    local app_bundle="${app%/Contents/MacOS/*}"
+    osascript -e "quit app \"$app_bundle\"" >/dev/null 2>&1
     local i=0
     while [[ $i -lt 20 ]] && ps -p "$old_pid" >/dev/null 2>&1; do
       sleep 1
       i=$((i + 1))
     done
     if ps -p "$old_pid" >/dev/null 2>&1; then
-      echo "错误: Codex 仍在运行，请先手动退出后再执行 sing-run codex"
+      echo "错误: $app_label 仍在运行，请先手动退出后再执行 sing-run $app_command"
       return 1
     fi
   fi
 
-  # env -u drops a proxy inherited by this shell so only the selected
-  # instance is visible to Codex.
-  nohup env \
-    -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
-    HTTP_PROXY="$proxy" \
-    HTTPS_PROXY="$proxy" \
-    NO_PROXY="localhost,127.0.0.1,::1" \
-    "$app" >/dev/null 2>&1 &
-  disown
+  _sing_run_proxy_app_launch "$app" "$proxy"
 
-  echo "✓ 已用 $region_name ($region) 的 HTTP 代理启动 Codex"
+  echo "✓ 已用 $region_name ($region) 的 HTTP 代理启动 $app_label"
   echo "  $proxy"
   echo "  仅此进程使用该代理，未修改系统代理或其他实例"
+}
+
+_sing_run_proxy_app_launch() {
+  local app="$1" proxy="$2"
+  # Chromium does not use these environment variables for its network
+  # service, so pass its proxy switch as well as the native client env.
+  nohup env \
+    -u ELECTRON_RUN_AS_NODE \
+    -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u NO_PROXY \
+    -u http_proxy -u https_proxy -u all_proxy -u no_proxy \
+    HTTP_PROXY="$proxy" \
+    HTTPS_PROXY="$proxy" \
+    http_proxy="$proxy" \
+    https_proxy="$proxy" \
+    NO_PROXY="localhost,127.0.0.1,::1" \
+    no_proxy="localhost,127.0.0.1,::1" \
+    "$app" "--proxy-server=$proxy" >/dev/null 2>&1 &
+  disown
 }
 
 # List nodes for a specific region
@@ -659,6 +719,14 @@ sing-run() {
     codex)
       shift
       _sing_run_codex "$@"
+      ;;
+    chatgpt)
+      shift
+      _sing_run_chatgpt "$@"
+      ;;
+    t3)
+      shift
+      _sing_run_t3 "$@"
       ;;
     restart)
       # Restart instances
