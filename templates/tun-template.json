@@ -24,7 +24,8 @@
             {
                 "type": "fakeip",
                 "tag": "proxy-fakeip",
-                "inet4_range": "198.18.0.0/15"
+                "inet4_range": "198.18.0.0/15",
+                "inet6_range": "2001:2::/48"
             }
         ],
         "rules": [
@@ -65,7 +66,7 @@
             }
         ],
         "final": "proxy-dns",
-        "strategy": "ipv4_only"
+        "strategy": "prefer_ipv4"
     },
     "inbounds": [
         {
@@ -73,7 +74,8 @@
             "tag": "tun-in",
             "interface_name": "{{TUN_INTERFACE}}",
             "address": [
-                "{{IP_CIDR}}"
+                "{{IP_CIDR}}",
+                "fd21:3b74:9c5a::1/126"
             ],
             "mtu": 1400,
             "auto_route": "{{AUTO_ROUTE}}",
@@ -160,7 +162,8 @@
             "{{CUSTOM_ROUTE_RULES}}",
             {
                 "ip_cidr": [
-                    "198.18.0.0/15"
+                    "198.18.0.0/15",
+                    "2001:2::/48"
                 ],
                 "outbound": "proxy"
             },

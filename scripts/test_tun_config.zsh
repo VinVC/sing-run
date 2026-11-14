@@ -111,6 +111,8 @@ cache_file = config.get("experimental", {}).get("cache_file", {})
 assert cache_file.get("store_fakeip") is True, "FakeIP mappings must persist across TUN restarts"
 assert not cache_file.get("store_dns"), "real DNS answers must not persist across home and corp networks"
 assert tun_inbound is not None, "TUN inbound must exist"
+assert tun_inbound.get("address") == ["172.19.99.1/30", "fd21:3b74:9c5a::1/126"], "TUN must capture both IPv4 and IPv6"
+assert tun_inbound.get("auto_route") is True, "TUN must install routes for both address families"
 assert "sniff" not in tun_inbound, "legacy inbound sniff was removed in sing-box 1.13"
 assert "sniff_override_destination" not in tun_inbound, "legacy inbound sniff_override_destination was removed in sing-box 1.13"
 assert any(rule.get("action") == "sniff" for rule in routes), "protocol sniff must be a route action"
@@ -126,18 +128,21 @@ assert direct is not None, "direct outbound must exist"
 assert direct.get("domain_resolver") == "internal-dns", "direct domains must preserve corp split-DNS answers"
 
 fakeip_proxy_idx = next(
-    (i for i, rule in enumerate(routes) if "198.18.0.0/15" in rule.get("ip_cidr", []) and rule.get("outbound") == "proxy"),
+    (i for i, rule in enumerate(routes) if {"198.18.0.0/15", "2001:2::/48"}.issubset(rule.get("ip_cidr", [])) and rule.get("outbound") == "proxy"),
     None,
 )
 private_direct_idx = next(
     (i for i, rule in enumerate(routes) if rule.get("ip_is_private") is True and rule.get("outbound") == "direct"),
     None,
 )
-assert fakeip_proxy_idx is not None, "fakeip range must route to proxy"
+assert fakeip_proxy_idx is not None, "IPv4 and IPv6 fakeip ranges must route to proxy"
 assert private_direct_idx is not None, "private IP direct rule must remain"
 assert fakeip_proxy_idx < private_direct_idx, "fakeip proxy rule must precede private direct rule"
 
 dns_rules = config.get("dns", {}).get("rules", [])
+assert config["dns"].get("strategy") == "prefer_ipv4", "TUN DNS must allow AAAA queries"
+fakeip_dns = next((s for s in config["dns"]["servers"] if s.get("tag") == "proxy-fakeip"), {})
+assert fakeip_dns.get("inet6_range") == "2001:2::/48", "FakeIP must be able to answer AAAA queries"
 assert any(rule.get("rule_set") == "openai" and rule.get("server") == "proxy-fakeip" for rule in dns_rules), "OpenAI DNS must use fakeip"
 assert any(rule.get("rule_set") == "openai" and rule.get("outbound") == "proxy" for rule in routes), "OpenAI routes must use proxy"
 assert any(rule.get("rule_set") == "claude" and rule.get("server") == "proxy-fakeip" for rule in dns_rules), "Claude DNS must use fakeip"
